@@ -62,7 +62,10 @@ jobs:
           rm -rf "dist/${PKG_NAME}"
           mkdir -p "$PKG_DIR"
 
-          cp VGMissionJournal/bin/Debug/netstandard2.1/VGMissionJournal.dll "$PKG_DIR/"
+          # *.dll = VGMissionJournal.dll + any bundled runtime dep (Newtonsoft.Json,
+          # which game 0.8.1 no longer ships). CopyLocalLockFileAssemblies keeps
+          # this to just those — BepInEx/Harmony/Unity are compile-only.
+          cp VGMissionJournal/bin/Debug/netstandard2.1/*.dll "$PKG_DIR/"
           cp README.md "$PKG_DIR/"
           [ -f LICENSE ] && cp LICENSE "$PKG_DIR/" || true
 
