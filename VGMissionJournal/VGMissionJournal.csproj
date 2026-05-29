@@ -12,12 +12,14 @@
       https://api.nuget.org/v3/index.json;
       https://nuget.bepinex.dev/v3/index.json;
     </RestoreAdditionalProjectSources>
-    <!-- BepInEx / HarmonyX / UnityEngine.Modules / Newtonsoft.Json are compile-only
-         (the game ships them at runtime) so they stay out of bin. Log-shape is
-         all primitive / nullable-primitive records — no TypeNameHandling.Auto
-         surface, so we need no System.Text.Json fallback and no
-         ISerializationBinder. CopyLocalLockFileAssemblies stays on to catch any
-         future runtime-only dep that genuinely needs to ship. -->
+    <!-- BepInEx / HarmonyX / UnityEngine.Modules are compile-only (the game /
+         BepInEx ship them at runtime) so they stay out of bin. Newtonsoft.Json
+         WAS compile-only too, but game 0.8.1 removed Newtonsoft.Json.dll from
+         Managed/ — so we now ship it (IncludeAssets includes runtime →
+         CopyLocalLockFileAssemblies drops it in bin → deploy copies it beside
+         the plugin). Log-shape is all primitive / nullable-primitive records —
+         no TypeNameHandling.Auto surface, so we need no System.Text.Json
+         fallback and no ISerializationBinder. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
@@ -32,7 +34,8 @@
          instructed to leave this one alone until BepInEx 5 bumps HarmonyX
          or we ship the MonoMod runtime DLLs ourselves. -->
     <PackageReference Include="HarmonyX" Version="2.10.*" IncludeAssets="compile" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" IncludeAssets="compile" />
+    <!-- Ships at runtime: game 0.8.1 no longer provides Newtonsoft.Json.dll. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" IncludeAssets="compile;runtime" />
   </ItemGroup>
 
   <ItemGroup>
