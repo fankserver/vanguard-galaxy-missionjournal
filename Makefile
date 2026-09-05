@@ -30,7 +30,9 @@ link-asm:
 	@test -f VGMissionJournal/lib/Assembly-CSharp.dll || { echo 'Run make refresh-asm with the current owner-installed game and assembly-publicizer.'; exit 1; }
 
 refresh-asm:
-	$(PUBLICIZER) --strip "$(GAME_DIR)/VanguardGalaxy_Data/Managed/Assembly-CSharp.dll" -o .local-reference
+	mkdir -p .local-reference
+	$(PUBLICIZER) --strip "$(GAME_DIR)/VanguardGalaxy_Data/Managed/Assembly-CSharp.dll" -o .local-reference/
+	@test -s .local-reference/Assembly-CSharp-publicized.dll
 	@mkdir -p VGMissionJournal/lib
 	ln -sfn "$(CURDIR)/.local-reference/Assembly-CSharp-publicized.dll" VGMissionJournal/lib/Assembly-CSharp.dll
 
