@@ -55,7 +55,7 @@ deploy: package
 	# Only owned plugin + Newtonsoft; never copy API/Unity/game references.
 	cp "$(BUILDDIR)/VGMissionJournal.dll" "$(BUILDDIR)/Newtonsoft.Json.dll" "$(VGMISSIONJOURNAL_DIR)/"
 	@if [ -f "$(BUILDDIR)/VGMissionJournal.pdb" ]; then cp "$(BUILDDIR)/VGMissionJournal.pdb" "$(VGMISSIONJOURNAL_DIR)/"; fi
-	@echo "Deployed $(shell ls $(BUILDDIR)/*.dll | wc -l) DLL(s) to $(VGMISSIONJOURNAL_DIR)"
+	@echo "Deployed 2 DLL(s) to $(VGMISSIONJOURNAL_DIR)"
 
 clean:
 	-$(DOTNET) clean VGMissionJournal/VGMissionJournal.csproj

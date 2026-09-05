@@ -82,6 +82,8 @@ Always null-check.
 
 ## `IMissionJournalQuery`
 
+Call journal queries on the Unity main thread. Lifecycle-gated queries can throw off-thread; take the data needed by background work before scheduling it. During loading or invalidation, queries return empty rather than another session's history.
+
 All query methods return typed `MissionRecord` aggregates (or small typed records like `SystemActivity`). Consumers get IntelliSense, nullable flow-analysis, and compile-time errors on field renames.
 
 ### Properties
@@ -292,6 +294,8 @@ If you'd rather read the journal without loading VGMissionJournal (offline analy
 - `version` bumps on breaking schema changes. Additive changes (new optional fields) stay at the current version.
 
 ## Known gaps
+
+- **Pre-readiness new-game grants are not recorded.** Recording begins at PlayerReady. The pilot verifies clearing prior history, not that every starter mission is granted after that boundary.
 
 These are documented limitations of the current shipping version. Consumers should treat the affected keys as always-absent for now.
 
