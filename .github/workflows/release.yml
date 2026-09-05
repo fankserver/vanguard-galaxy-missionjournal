@@ -1,88 +1,26 @@
-name: Package release
-
-# Triggers when a GitHub Release is published. Also runnable manually.
-#
-# The plugin references Assembly-CSharp.dll (the game's proprietary
-# assembly). It can't live on a public runner, so the repo commits a
-# PUBLICIZED stub (method signatures only, no IL) at
-# VGMissionJournal/lib/Assembly-CSharp.dll. CI compiles against the stub;
-# the real runtime assembly takes over in-game via Mono's late binding.
-
+name: Validate owner-built release
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to (re)package"
+        description: Release tag with an owner-built VGMissionJournal.zip attached
         required: true
         type: string
-
 permissions:
-  contents: write
-
+  contents: read
 jobs:
-  package:
+  validate:
     runs-on: ubuntu-latest
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
-
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout repo at release tag
-        uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ env.TAG }}
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Verify publicized reference is committed
-        run: |
-          path="VGMissionJournal/lib/Assembly-CSharp.dll"
-          if [ ! -s "$path" ]; then
-            echo "::error::$path is missing or empty. Regenerate via 'assembly-publicizer --strip <game>/Assembly-CSharp.dll -o $path' and commit. (--strip is required.)"
-            exit 1
-          fi
-          echo "Publicized reference present: $path ($(du -h "$path" | cut -f1))"
-
-      - name: Build VGMissionJournal.dll
-        run: dotnet build VGMissionJournal/VGMissionJournal.csproj -c Debug --nologo
-
-      - name: Stage release layout
-        id: stage
-        run: |
-          VERSION=$(grep 'PluginVersion =' VGMissionJournal/Plugin.cs | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          PKG_NAME="VGMissionJournal-v${VERSION}"
-          # Nested VGMissionJournal/ is intentional: it's the folder the user
-          # drops into BepInEx/plugins/.
-          PKG_DIR="dist/${PKG_NAME}/VGMissionJournal"
-
-          rm -rf "dist/${PKG_NAME}"
-          mkdir -p "$PKG_DIR"
-
-          # *.dll = VGMissionJournal.dll + any bundled runtime dep (Newtonsoft.Json,
-          # which game 0.8.1 no longer ships). CopyLocalLockFileAssemblies keeps
-          # this to just those — BepInEx/Harmony/Unity are compile-only.
-          cp VGMissionJournal/bin/Debug/netstandard2.1/*.dll "$PKG_DIR/"
-          cp README.md "$PKG_DIR/"
-          [ -f LICENSE ] && cp LICENSE "$PKG_DIR/" || true
-
-          SIZE=$(du -sh "$PKG_DIR" | cut -f1)
-          echo "Staged DLL + README — $SIZE at $PKG_DIR"
-
-          echo "pkg_name=${PKG_NAME}" >> "$GITHUB_OUTPUT"
-
-      - name: Zip release bundle
-        run: |
-          (cd "dist/${{ steps.stage.outputs.pkg_name }}" && \
-             zip -qr "../${{ steps.stage.outputs.pkg_name }}.zip" VGMissionJournal)
-          ls -lh "dist/${{ steps.stage.outputs.pkg_name }}.zip"
-
-      - name: Upload zip to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "$TAG" "dist/${{ steps.stage.outputs.pkg_name }}.zip" --clobber
-          echo "Uploaded ${{ steps.stage.outputs.pkg_name }}.zip to release $TAG"
+      - name: Download owner-built artifact, never game references
+        run: gh release download "$TAG" --pattern 'VGMissionJournal.zip' --dir dist
+      - name: Validate file layout
+        run: python3 tools/package.py --check dist/VGMissionJournal.zip

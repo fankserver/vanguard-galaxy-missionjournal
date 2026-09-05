@@ -4,7 +4,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>VGMissionJournal</AssemblyName>
     <Product>Vanguard Galaxy Mission Journal</Product>
-    <Version>0.1.2</Version>
+    <Version>0.2.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>VGMissionJournal</RootNamespace>
@@ -39,15 +39,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Publicized stub of the game's Assembly-CSharp.dll — committed to
-         lib/ so CI can build without a sibling checkout. Regenerate the
-         stub after game updates with `assembly-publicizer` using its
-         strip flag (see .gitignore for the full command line).
-         Conditional so an incomplete checkout can still `dotnet restore`
-         for nuget-only operations; build fails later if the stub is
-         missing and any code references game types. -->
+    <!-- Owner-provided publicized game reference. Never commit or package it.
+         make refresh-asm generates current metadata without changing sibling stubs. -->
     <Reference Include="Assembly-CSharp" Condition="Exists('lib/Assembly-CSharp.dll')">
       <HintPath>lib/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VGModAPI.Abstractions">
+      <HintPath>lib/VGModAPI.Abstractions.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

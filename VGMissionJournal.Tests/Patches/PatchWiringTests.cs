@@ -29,7 +29,7 @@ public class PatchWiringTests
         var io      = new JournalIO(() => DateTime.UtcNow);
         var bepLog  = new ManualLogSource("test");
 
-        PatchWiring.WireAll(builder, store, io, bepLog);
+        PatchWiring.WireAll(builder, store, bepLog);
 
         var patchTypes = typeof(PatchWiring).Assembly
             .GetTypes()
