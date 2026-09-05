@@ -5,14 +5,13 @@ VGMissionJournal.Tests/bin/
 VGMissionJournal.Tests/obj/
 dist/
 
-# Plugin's compile-time reference
-# - Assembly-CSharp.dll: publicized STUB of the game's assembly (method
-#   signatures only, no IL bodies). Committed so CI can build.
-# Regenerate after game updates via:
-#   assembly-publicizer --strip <game>/VanguardGalaxy_Data/Managed/Assembly-CSharp.dll \
-#                       -o VGMissionJournal/lib/Assembly-CSharp.dll
-# --strip is REQUIRED: it replaces every method body with `throw null;` so the
-# committed artifact carries no game IL.
+# Owner-provided game metadata stays local, including publicized stubs.
+VGMissionJournal/lib/Assembly-CSharp.dll
+.local-reference/
+__pycache__/
+
+# Owner-provided API contract; install one copy with the API, never vendor it here.
+VGMissionJournal/lib/VGModAPI.Abstractions.dll
 
 # Editor cruft
 .vs/

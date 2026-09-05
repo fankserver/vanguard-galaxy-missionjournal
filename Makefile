@@ -10,9 +10,9 @@ GAME_DIR   := /mnt/c/Program Files (x86)/Steam/steamapps/common/Vanguard Galaxy
 PLUGIN_DIR := $(GAME_DIR)/BepInEx/plugins
 VGMISSIONJOURNAL_DIR := $(PLUGIN_DIR)/VGMissionJournal
 
-# Path to the sibling VGTTS checkout — we reuse its publicized stub so all
-# three mods (VGTTS, VGAnima, VGMissionJournal) compile against the same stub.
-VGTTS_LIB := ../vanguard-galaxy-tts/VGTTS/lib
+# Current owner-local metadata; older sibling stubs hide signature drift.
+PUBLICIZER ?= assembly-publicizer
+VGAPI_DLL ?= ../vanguard-galaxy-api/VGModAPI.Abstractions/bin/Release/netstandard2.1/VGModAPI.Abstractions.dll
 
 DOTNET ?= $(shell command -v dotnet 2>/dev/null || echo /tmp/dnsdk/dotnet/dotnet)
 
@@ -22,36 +22,40 @@ DOTNET ?= $(shell command -v dotnet 2>/dev/null || echo /tmp/dnsdk/dotnet/dotnet
 # hosts without pinning a specific SDK.
 export DOTNET_ROLL_FORWARD := LatestMajor
 
-.PHONY: all build link-asm deploy clean test
+.PHONY: all build link-asm refresh-asm link-api deploy clean test package
 
 all: build
 
-# Symlink the VGTTS-maintained publicized Assembly-CSharp.dll into
-# VGMissionJournal/lib/ so we compile against the same stub (single source of
-# truth across VGTTS / VGAnima / VGMissionJournal).
 link-asm:
-	@mkdir -p VGMissionJournal/lib
-	@if [ ! -e "VGMissionJournal/lib/Assembly-CSharp.dll" ]; then \
-		ln -sf "$(abspath $(VGTTS_LIB))/Assembly-CSharp.dll" VGMissionJournal/lib/Assembly-CSharp.dll ; \
-		echo "Linked Assembly-CSharp.dll from $(VGTTS_LIB)" ; \
-	fi
+	@test -f VGMissionJournal/lib/Assembly-CSharp.dll || { echo 'Run make refresh-asm with the current owner-installed game and assembly-publicizer.'; exit 1; }
 
-build: link-asm
+refresh-asm:
+	$(PUBLICIZER) --strip "$(GAME_DIR)/VanguardGalaxy_Data/Managed/Assembly-CSharp.dll" -o .local-reference
+	@mkdir -p VGMissionJournal/lib
+	ln -sfn "$(CURDIR)/.local-reference/Assembly-CSharp-publicized.dll" VGMissionJournal/lib/Assembly-CSharp.dll
+
+link-api:
+	@test -f "$(VGAPI_DLL)" || { echo 'Build the API Release package first, or set VGAPI_DLL to its Abstractions DLL.'; exit 1; }
+	@mkdir -p VGMissionJournal/lib
+	@ln -sf "$(abspath $(VGAPI_DLL))" VGMissionJournal/lib/VGModAPI.Abstractions.dll
+
+build: link-asm link-api
 	DOTNET_ROOT=$(dir $(DOTNET)) $(DOTNET) build VGMissionJournal/VGMissionJournal.csproj -c $(CONFIG)
 
-test:
+test: link-asm link-api
+	python3 tools/test_package.py
 	DOTNET_ROOT=$(dir $(DOTNET)) $(DOTNET) test VGMissionJournal.Tests/VGMissionJournal.Tests.csproj -c $(CONFIG)
 
-deploy: build
+package: build
+	python3 tools/package.py --configuration $(CONFIG)
+
+deploy: package
 	@test -d "$(PLUGIN_DIR)" || { echo "BepInEx plugins dir not found at $(PLUGIN_DIR)" ; exit 1 ; }
 	@mkdir -p "$(VGMISSIONJOURNAL_DIR)"
-	# Copy every runtime assembly from bin/. CopyLocalLockFileAssemblies=true
-	# in VGMissionJournal.csproj restricts bin/ to VGMissionJournal.dll + any NuGet
-	# runtime dep the game doesn't ship; BepInEx / Harmony / UnityEngine /
-	# Newtonsoft are compile-only so they don't land here.
-	cp "$(BUILDDIR)"/*.dll "$(VGMISSIONJOURNAL_DIR)/"
+	# Only owned plugin + Newtonsoft; never copy API/Unity/game references.
+	cp "$(BUILDDIR)/VGMissionJournal.dll" "$(BUILDDIR)/Newtonsoft.Json.dll" "$(VGMISSIONJOURNAL_DIR)/"
 	@if [ -f "$(BUILDDIR)/VGMissionJournal.pdb" ]; then cp "$(BUILDDIR)/VGMissionJournal.pdb" "$(VGMISSIONJOURNAL_DIR)/"; fi
-	@echo "Deployed $(shell ls $(BUILDDIR)/*.dll | wc -l) DLL(s) to $(VGMISSIONJOURNAL_DIR)"
+	@echo "Deployed 2 DLL(s) to $(VGMISSIONJOURNAL_DIR)"
 
 clean:
 	-$(DOTNET) clean VGMissionJournal/VGMissionJournal.csproj

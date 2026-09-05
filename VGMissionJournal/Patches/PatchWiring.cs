@@ -13,7 +13,6 @@ internal static class PatchWiring
     public static void WireAll(
         MissionRecordBuilder builder,
         MissionStore         store,
-        JournalIO                io,
         ManualLogSource      bepLog)
     {
         MissionAcceptPatch.Builder   = builder;
@@ -36,12 +35,5 @@ internal static class PatchWiring
         MissionArchivePatch.Store    = store;
         MissionArchivePatch.BepLog   = bepLog;
 
-        SaveWritePatch.Store         = store;
-        SaveWritePatch.IO            = io;
-        SaveWritePatch.BepLog        = bepLog;
-
-        SaveLoadPatch.Store          = store;
-        SaveLoadPatch.IO             = io;
-        SaveLoadPatch.BepLog         = bepLog;
     }
 }

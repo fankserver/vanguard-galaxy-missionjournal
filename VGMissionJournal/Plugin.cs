@@ -3,6 +3,8 @@ using System.Linq;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
+using BepInEx.Bootstrap;
+using VGModAPI;
 using HarmonyLib;
 using Source.Galaxy;
 using Source.Player;
@@ -18,11 +20,12 @@ namespace VGMissionJournal;
 
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 [BepInProcess("VanguardGalaxy.exe")]
+[BepInDependency(ModApi.PluginId, "0.1.0")]
 public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid    = "vgmissionjournal";
     public const string PluginName    = "Vanguard Galaxy Mission Journal";
-    public const string PluginVersion = "0.1.3";
+    public const string PluginVersion = "0.2.0";
 
     internal static Plugin          Instance { get; private set; } = null!;
     internal static ManualLogSource Log      { get; private set; } = null!;
@@ -34,6 +37,7 @@ public class Plugin : BaseUnityPlugin
     internal MissionJournalConfig     Cfg     { get; private set; } = null!;
 
     private Harmony _harmony = null!;
+    private LifecyclePersistence? _lifecycle;
 
     // Reflection-resolved once — MapElement.<guid>k__BackingField on the
     // player's current POI -> system.
@@ -83,65 +87,48 @@ public class Plugin : BaseUnityPlugin
             };
         }
 
-        // --- wire every patch's static slots ----------------------------
-        PatchWiring.WireAll(Builder, Store, Io, Log);
-
-        // --- patch attach -----------------------------------------------
-        _harmony = new Harmony(PluginGuid);
-        _harmony.PatchAll(typeof(MissionAcceptPatch));
-        _harmony.PatchAll(typeof(MissionCompletePatch));
-        _harmony.PatchAll(typeof(MissionFailPatch));
-        _harmony.PatchAll(typeof(MissionAbandonPatch));
-        _harmony.PatchAll(typeof(MissionArchivePatch));
-        _harmony.PatchAll(typeof(SaveWritePatch));
-        _harmony.PatchAll(typeof(SaveLoadPatch));
-
-        // --- startup janitor (spec R3.2) --------------------------------
+        var api = ModApi.Current;
+        if (!Chainloader.PluginInfos.TryGetValue(ModApi.PluginId, out var apiPlugin)
+            || !LifecyclePersistence.IsCompatible(apiPlugin.Metadata.Version, api))
+        {
+            enabled = false;
+            Log.LogError("Requires VGModAPI 0.1.x with available session-lifecycle and save-outcomes; journal disabled without touching sidecars.");
+            return;
+        }
+        Store.RecordingAllowed = () => _lifecycle?.CanRecord == true;
         try
         {
-            var savesPath = SaveGame.SavesPath;
-            var swept = DeadSidecarSweeper.Sweep(savesPath);
-            if (swept.Count > 0)
-                Log.LogInfo($"Swept {swept.Count} dead sidecar(s) from {savesPath}");
+            Log.LogWarning("Using experimental VGModAPI lifecycle; full runtime qualification remains pending.");
+            PatchWiring.WireAll(Builder, Store, Log);
+
+            // Finish domain binding before subscribing or restoring any sidecar.
+            _harmony = new Harmony(PluginGuid);
+            _harmony.PatchAll(typeof(MissionAcceptPatch));
+            _harmony.PatchAll(typeof(MissionCompletePatch));
+            _harmony.PatchAll(typeof(MissionFailPatch));
+            _harmony.PatchAll(typeof(MissionAbandonPatch));
+            _harmony.PatchAll(typeof(MissionArchivePatch));
+
+            _lifecycle = new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
+            MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);
+            var patchCount = _harmony.GetPatchedMethods().Count();
+            Log.LogInfo($"{PluginName} v{PluginVersion} loaded ({patchCount} patched method(s))");
         }
-        catch (Exception e)
+        catch (Exception error)
         {
-            Log.LogError($"Dead-sidecar sweep failed: {e}");
-        }
-
-        // --- safety-net quit-flush (spec R3.2) --------------------------
-        Application.quitting += OnApplicationQuitting;
-
-        // --- public facade (spec R4.2) ----------------------------------
-        MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);
-
-        var patchCount = _harmony.GetPatchedMethods().Count();
-        Log.LogInfo($"{PluginName} v{PluginVersion} loaded ({patchCount} patched method(s))");
-    }
-
-    private void OnApplicationQuitting()
-    {
-        var path = SaveLoadPatch.LastKnownSavePath ?? SaveWritePatch.LastKnownSavePath;
-        if (path is null) return;
-        try
-        {
-            var sidecar = JournalPathResolver.From(path);
-            var schema  = new JournalSchema(
-                JournalSchema.CurrentVersion,
-                Store.AllMissions.ToArray());
-            Io.Write(sidecar, schema);
-            Log.LogInfo($"ApplicationQuit: flushed {schema.Missions.Length} mission(s) to {sidecar}");
-        }
-        catch (Exception e)
-        {
-            Log.LogError($"Quit-time flush failed: {e}");
+            enabled = false;
+            MissionJournalApi.Current = null;
+            _lifecycle?.Dispose();
+            _lifecycle = null;
+            _harmony?.UnpatchSelf();
+            Log.LogError($"Journal initialization failed; persistence disabled: {error}");
         }
     }
 
     private void OnDestroy()
     {
         MissionJournalApi.Current = null;
-        Application.quitting -= OnApplicationQuitting;
+        _lifecycle?.Dispose();
         _harmony?.UnpatchSelf();
     }
 }

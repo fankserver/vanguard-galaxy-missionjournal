@@ -39,6 +39,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VGMissionJournal\VGMissionJournal.csproj" />
+    <Reference Include="VGModAPI.Abstractions">
+      <HintPath>..\VGMissionJournal\lib\VGModAPI.Abstractions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,18 +1,19 @@
 # VGMissionJournal — Observational mission-activity logger for Vanguard Galaxy
 
-A BepInEx 5 plugin that records every mission-lifecycle transition — acceptance, completion, failure, abandonment — of every mission the player engages with, whether authored by vanilla or another mod. The journal is persisted per save, exposes a reflection-friendly public query API for other mods to consume, and **never mutates vanilla state**.
+A BepInEx 5 plugin that observes instrumented mission transitions — acceptance, completion, failure and abandonment — for vanilla and mod-authored missions. The journal is persisted per save, exposes a reflection-friendly public query API for other mods to consume, and **never mutates vanilla state**.
 
 ## Design principle: pure observer
 
-VGMissionJournal observes; it never mutates. Worst failure mode is a corrupt journal file the player can safely delete — history is lost, the save is not. This is why it's safe to leave running indefinitely alongside anything.
+VGMissionJournal does not intentionally mutate vanilla state. Journal persistence is a separate sidecar write, not an atomic transaction with the game save. Compatibility with arbitrary mods is not guaranteed.
 
 Consumers (future stats dashboards, LLM-driven NPCs, progression mods, etc.) soft-dep via reflection on a stable API surface. Consumers bucket and interpret; VGMissionJournal records what the game hands it and nothing more.
 
 ## Install
 
 1. Install BepInEx 5 for Vanguard Galaxy.
-2. Drop `VGMissionJournal.dll` into `<GameDir>/BepInEx/plugins/VGMissionJournal/`.
-3. Launch the game. On first save, a paired `<saveName>.save.vgmissionjournal.json` appears next to the vanilla `.save` file.
+2. Install the experimental [VGModAPI 0.1.x](https://github.com/fankserver/vanguard-galaxy-api) package once. Keep its three DLLs together; do not duplicate Abstractions in consumer folders.
+3. Extract the journal archive into `BepInEx/plugins/`, including its bundled Newtonsoft.Json and notices. Version 0.2.0 requires the API; BepInEx refuses a missing/too-old dependency. Unsupported API series or unavailable lifecycle/save capabilities disable the journal with a log message, without touching sidecars.
+4. Launch the game. On a successful observed save, a paired `<saveName>.save.vgmissionjournal.json` appears next to the vanilla `.save` file.
 
 Config lives at `<GameDir>/BepInEx/config/vgmissionjournal.cfg` after first run:
 
@@ -67,23 +68,29 @@ Full list: [`docs/api.md#known-gaps`](docs/api.md#known-gaps).
 
 ## Safety invariants
 
-VGMissionJournal is a **pure observer**. The Harmony patch set is postfix-only, with one allowed prefix on save-load for timing. Every patch body is wrapped in try/catch and warn-logs on failure — vanilla execution must survive our internal state. If the sidecar is missing or corrupt, the journal starts empty and vanilla loads normally; the corrupt file is quarantined with a UTC timestamp for forensic inspection.
+Domain mission Harmony hooks remain, including completion/archive coordination. Acceptance targets the inspected `(Mission, bool)` overload and checks actual insertion, not a normally returning duplicate rejection. Save/load hooks and the independent quit flush are removed: API Starting/invalidation clears state, PlayerReady restores it, and only matching-session SaveSucceeded writes the event's destination. Failed/skipped/unknown-session saves do not write sidecars. Quit autosave uses the same success path. Recording is gated while loading and after teardown. The former startup sweeper now runs only for an observed save directory.
+
+Schema and public query signatures are unchanged. Missing/corrupt sidecars retain the existing empty-store/quarantine policy. A sidecar error cannot turn vanilla success into a rollback. These are narrow lifecycle guarantees, not universal UI readiness or complete runtime qualification.
 
 ## Build
 
 ```bash
-DOTNET_ROLL_FORWARD=LatestMajor dotnet build VGMissionJournal.sln -c Debug
-DOTNET_ROLL_FORWARD=LatestMajor dotnet test VGMissionJournal.Tests/VGMissionJournal.Tests.csproj --no-build -c Debug
+# First build the sibling API Release package, or pass VGAPI_DLL=/path/to/VGModAPI.Abstractions.dll.
+make build
+make test
+make package CONFIG=Release
 ```
 
 Or via the Makefile:
 
 ```bash
-make link-asm    # symlink Assembly-CSharp.dll from sibling VGTTS checkout
+make refresh-asm # owner-local current game metadata; requires assembly-publicizer
 make build
 make test
 make deploy      # copies the DLL into <GameDir>/BepInEx/plugins/VGMissionJournal/
 ```
+
+Game references (including stripped/publicized stubs) remain owner-local and are no longer tracked. The historical stub is not removed from Git history by this change. Public release CI only validates an already uploaded owner-built `VGMissionJournal.zip`; it does not build with game assets. Build/test/package locally, inspect `dist/VGMissionJournal.zip`, and attach it when publishing a release. The zip excludes API, game, loader and Unity DLLs; its checker verifies layout, not binary provenance.
 
 ## License
 

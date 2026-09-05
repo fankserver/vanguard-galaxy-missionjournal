@@ -32,17 +32,19 @@ internal sealed class MissionStore
         _onFirstEviction = onFirstEviction;
     }
 
+    internal Func<bool>? RecordingAllowed { get; set; }
+
     public bool IsUnbounded => _maxMissions == Unbounded;
     public int  MaxMissions => _maxMissions;
-    public int  TotalMissionCount => _records.Count;
+    public int  TotalMissionCount => AllMissions.Count;
 
-    public IReadOnlyList<MissionRecord> AllMissions => _records;
+    public IReadOnlyList<MissionRecord> AllMissions => RecordingAllowed?.Invoke() == false ? Array.Empty<MissionRecord>() : _records;
 
     /// <summary>Fires after every <see cref="Upsert"/>. Swallowed on throw.</summary>
     public event Action<MissionRecord>? OnMissionChanged;
 
     public MissionRecord? GetByInstanceId(string instanceId) =>
-        _byInstanceId.TryGetValue(instanceId, out var r) ? r : null;
+        RecordingAllowed?.Invoke() != false && _byInstanceId.TryGetValue(instanceId, out var r) ? r : null;
 
     /// <summary>
     /// Insert or replace a record. Replacement is by
@@ -52,6 +54,7 @@ internal sealed class MissionStore
     public void Upsert(MissionRecord record)
     {
         if (record is null) throw new ArgumentNullException(nameof(record));
+        if (RecordingAllowed?.Invoke() == false) return;
 
         if (_byInstanceId.TryGetValue(record.MissionInstanceId, out var existing))
         {
@@ -77,14 +80,14 @@ internal sealed class MissionStore
     public IReadOnlyList<MissionRecord> GetActiveMissions()
     {
         var result = new List<MissionRecord>();
-        foreach (var r in _records) if (r.IsActive) result.Add(r);
+        foreach (var r in AllMissions) if (r.IsActive) result.Add(r);
         return result;
     }
 
     public IReadOnlyList<MissionRecord> GetMissionsInSystem(string systemId)
     {
         var result = new List<MissionRecord>();
-        foreach (var r in _records)
+        foreach (var r in AllMissions)
             if (string.Equals(r.SourceSystemId, systemId, StringComparison.Ordinal))
                 result.Add(r);
         return result;
@@ -93,7 +96,7 @@ internal sealed class MissionStore
     public IReadOnlyList<MissionRecord> GetMissionsByFaction(string factionId)
     {
         var result = new List<MissionRecord>();
-        foreach (var r in _records)
+        foreach (var r in AllMissions)
             if (string.Equals(r.SourceFaction, factionId, StringComparison.Ordinal))
                 result.Add(r);
         return result;

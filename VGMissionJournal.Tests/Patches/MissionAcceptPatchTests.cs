@@ -8,6 +8,7 @@ using Xunit;
 
 namespace VGMissionJournal.Tests.Patches;
 
+[Collection("PatchStatics")]
 public class MissionAcceptPatchTests
 {
     [Fact]
@@ -20,7 +21,7 @@ public class MissionAcceptPatchTests
             nameof(GamePlayer.AddMissionWithLog),
             BindingFlags.Instance | BindingFlags.Public,
             binder: null,
-            types: new[] { typeof(Mission) },
+            types: new[] { typeof(Mission), typeof(bool) },
             modifiers: null);
 
         Assert.NotNull(target);
@@ -38,6 +39,22 @@ public class MissionAcceptPatchTests
         Assert.Equal(typeof(GamePlayer),                attr!.info.declaringType);
         Assert.Equal(nameof(GamePlayer.AddMissionWithLog), attr.info.methodName);
         Assert.Contains(typeof(Mission),                attr.info.argumentTypes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DuplicateRejectionDoesNotRecord(bool alreadyPresent)
+    {
+        var mission = Support.TestMission.Generic();
+        var missions = new System.Collections.Generic.List<Mission>();
+        if (alreadyPresent) missions.Add(mission);
+        var before = MissionAcceptPatch.Count(missions, mission);
+        Assert.Equal(alreadyPresent ? 1 : 0, before);
+        Assert.False(MissionAcceptPatch.WasInserted(missions, mission, before));
+        missions.Add(mission);
+        Assert.True(MissionAcceptPatch.WasInserted(missions, mission, before));
+        Assert.False(MissionAcceptPatch.WasInserted(missions, mission, -1));
     }
 
     [Fact]
