@@ -16,9 +16,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
     <PackageReference Include="xunit" Version="2.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.*" />
     <!-- Vanilla types (Mission subclasses, SpaceStation, etc.) surface in our
          test helpers via the publicized stub, so Unity's reference assemblies
          must be available for the CLR to resolve them during JIT. -->
