@@ -70,7 +70,7 @@ Full list: [`docs/api.md#known-gaps`](docs/api.md#known-gaps).
 
 Domain mission Harmony hooks remain, including completion/archive coordination. Acceptance targets the inspected `(Mission, bool)` overload and checks actual insertion, not a normally returning duplicate rejection. Save/load hooks and the independent quit flush are removed: API Starting/invalidation clears state, PlayerReady restores it, and only matching-session SaveSucceeded writes the event's destination. Failed/skipped/unknown-session saves do not write sidecars. Quit autosave uses the same success path. Recording is gated while loading and after teardown. The former startup sweeper now runs only for an observed save directory.
 
-Schema and public query signatures are unchanged. Missing/corrupt sidecars retain the existing empty-store/quarantine policy. A sidecar error cannot turn vanilla success into a rollback. These are narrow lifecycle guarantees, not universal UI readiness or complete runtime qualification. See [migration evidence and limits](docs/lifecycle-migration.md).
+Schema and public query signatures are unchanged. Missing/corrupt sidecars retain the existing empty-store/quarantine policy. A sidecar error cannot turn vanilla success into a rollback. These are narrow lifecycle guarantees, not universal UI readiness or complete runtime qualification.
 
 ## Build
 

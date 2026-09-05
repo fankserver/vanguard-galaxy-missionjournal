@@ -5,7 +5,7 @@ from pathlib import Path
 import stat
 import zipfile
 
-NAMES = {"VGMissionJournal.dll", "Newtonsoft.Json.dll", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "docs/api.md", "docs/lifecycle-migration.md"}
+NAMES = {"VGMissionJournal.dll", "Newtonsoft.Json.dll", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "docs/api.md"}
 
 
 def validate(path):
