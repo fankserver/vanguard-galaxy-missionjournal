@@ -114,7 +114,9 @@ public sealed class LifecyclePersistenceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("0.1.0", true)]
+    [InlineData("0.1.0", false)]
+    [InlineData("0.1.1", false)]
+    [InlineData("0.1.2", true)]
     [InlineData("0.1.9", true)]
     [InlineData("0.0.9", false)]
     [InlineData("0.2.0", false)]
@@ -139,9 +141,9 @@ public sealed class LifecyclePersistenceTests : IDisposable
     [Fact]
     public void MissingOrUnavailableApiIsRejected()
     {
-        Assert.False(LifecyclePersistence.IsCompatible(new Version(0, 1, 0), null));
+        Assert.False(LifecyclePersistence.IsCompatible(new Version(0, 1, 2), null));
         _api.Capabilities = Array.Empty<CapabilityStatus>();
-        Assert.False(LifecyclePersistence.IsCompatible(new Version(0, 1, 0), _api));
+        Assert.False(LifecyclePersistence.IsCompatible(new Version(0, 1, 2), _api));
     }
 
     public void Dispose() { _controller.Dispose(); Directory.Delete(_root, true); }

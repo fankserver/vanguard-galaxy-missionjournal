@@ -4,15 +4,15 @@ A BepInEx 5 plugin that observes instrumented mission transitions — acceptance
 
 ## Design principle: pure observer
 
-VGMissionJournal does not intentionally mutate vanilla state. Journal persistence is a separate sidecar write, not an atomic transaction with the game save. Compatibility with arbitrary mods is not guaranteed.
+VGMissionJournal does not intentionally mutate vanilla state. Default journal persistence is a separate sidecar write; opt-in coordinated persistence is also not an atomic transaction with the game save. Compatibility with arbitrary mods is not guaranteed.
 
 Consumers (future stats dashboards, LLM-driven NPCs, progression mods, etc.) soft-dep via reflection on a stable API surface. Consumers bucket and interpret; VGMissionJournal records what the game hands it and nothing more.
 
 ## Install
 
 1. Install BepInEx 5 for Vanguard Galaxy.
-2. Install the experimental [VGModAPI 0.1.x](https://github.com/fankserver/vanguard-galaxy-api) package once. Keep its three DLLs together; do not duplicate Abstractions in consumer folders.
-3. Extract the journal archive into `BepInEx/plugins/`, including its bundled Newtonsoft.Json and notices. Version 0.2.0 requires the API; BepInEx refuses a missing/too-old dependency. Unsupported API series or unavailable lifecycle/save capabilities disable the journal with a log message, without touching sidecars.
+2. Install the experimental [VGModAPI 0.1.2+ (0.1.x)](https://github.com/fankserver/vanguard-galaxy-api) package once. Keep its three DLLs together; do not duplicate Abstractions in consumer folders.
+3. Extract the journal archive into `BepInEx/plugins/`, including its bundled Newtonsoft.Json and notices. Version 0.3.0 requires API 0.1.2 or newer within 0.1.x; BepInEx refuses a missing/too-old dependency. Unsupported API series or unavailable lifecycle/save capabilities disable the journal with a log message, without touching sidecars.
 4. Launch the game. On a successful observed save, a paired `<saveName>.save.vgmissionjournal.json` appears next to the vanilla `.save` file.
 
 Config lives at `<GameDir>/BepInEx/config/vgmissionjournal.cfg` after first run:
@@ -70,7 +70,13 @@ Full list: [`docs/api.md#known-gaps`](docs/api.md#known-gaps).
 
 Domain mission Harmony hooks remain, including completion/archive coordination. Acceptance targets the inspected `(Mission, bool)` overload and checks actual insertion, not a normally returning duplicate rejection. Save/load hooks and the independent quit flush are removed: API Starting/invalidation clears state, PlayerReady restores it, and only matching-session SaveSucceeded writes the event's destination. Failed/skipped/unknown-session saves do not write sidecars. Quit autosave uses the same success path. Recording is gated while loading and after teardown. The former startup sweeper now runs only for an observed save directory.
 
-Schema and public query signatures are unchanged. Missing/corrupt sidecars retain the existing empty-store/quarantine policy. A sidecar error cannot turn vanilla success into a rollback. These are narrow lifecycle guarantees, not universal UI readiness or complete runtime qualification.
+Schema and public query signatures are unchanged. In default legacy mode, missing/corrupt sidecars retain the existing empty-store/quarantine policy. A sidecar error cannot turn vanilla success into a rollback. These are narrow lifecycle guarantees, not universal UI readiness or complete runtime qualification.
+
+### Experimental coordinated mode
+
+After explicitly enabling VGModAPI persistence, set `[Persistence] UseCoordinatedPersistence = true` in `vgmissionjournal.cfg`. There is no silent fallback if the service is unavailable. In this mode JournalSchema v3 is stored unchanged inside the API owner envelope; no legacy sidecars are written or swept. Capture reads an internal snapshot even while public recording/query gates are closed during callbacks. Recording resumes only when the registration grants mutation; faults and removal remain fail-closed and status changes are logged.
+
+`ImportLegacySidecars = true` separately opts into read-only adoption when the API supplies no known generation. Leave it false unless you explicitly accept the old file as the intended history: legacy filenames do not prove snapshot consistency. Corrupt, future-version, unreadable or over-1-MiB sources block restoration without quarantine or overwrite. Existing files remain untouched; no other mod's or account-wide history is imported. The coordinated payload limit is 1 MiB, so large histories may require retaining legacy mode. Full owner acceptance and native coordinated consumer qualification remain separate gates.
 
 ## Build
 
