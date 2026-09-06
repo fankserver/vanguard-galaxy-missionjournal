@@ -34,6 +34,9 @@ internal sealed class MissionStore
 
     internal Func<bool>? RecordingAllowed { get; set; }
 
+    // Persistence capture runs during dispatch, when public recording/query gates are closed.
+    internal MissionRecord[] CaptureRecords() => _records.ToArray();
+
     public bool IsUnbounded => _maxMissions == Unbounded;
     public int  MaxMissions => _maxMissions;
     public int  TotalMissionCount => AllMissions.Count;

@@ -7,7 +7,7 @@ using VGMissionJournal.Logging;
 
 namespace VGMissionJournal.Persistence;
 
-internal sealed class LifecyclePersistence : IDisposable
+internal sealed class LifecyclePersistence : IJournalPersistence
 {
     private readonly ILifecycleApi _api;
     private readonly MissionStore _store;
@@ -28,11 +28,11 @@ internal sealed class LifecyclePersistence : IDisposable
     }
 
     internal static bool IsCompatible(Version version, ILifecycleApi? api) => version.Major == 0 && version.Minor == 1
-        && version >= new Version(0, 1, 0) && api != null
+        && version >= new Version(0, 1, 2) && api != null
         && api.Capabilities.Any(c => c.Available && c.Name == "session-lifecycle")
         && api.Capabilities.Any(c => c.Available && c.Name == "save-outcomes");
 
-    internal bool CanRecord => !_disposed && _ready.HasValue && IsCurrent(_ready.Value);
+    public bool CanRecord => !_disposed && _ready.HasValue && IsCurrent(_ready.Value);
     private static bool IsReady(SessionSnapshot s) => s.Phase == SessionPhase.PlayerReady || s.Phase == SessionPhase.GameplayInitialized;
     private bool IsCurrent(Guid id) => _api.CurrentSession is { } current && current.Id == id && IsReady(current);
 

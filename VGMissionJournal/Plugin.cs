@@ -20,12 +20,12 @@ namespace VGMissionJournal;
 
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 [BepInProcess("VanguardGalaxy.exe")]
-[BepInDependency(ModApi.PluginId, "0.1.0")]
+[BepInDependency(ModApi.PluginId, "0.1.2")]
 public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid    = "vgmissionjournal";
     public const string PluginName    = "Vanguard Galaxy Mission Journal";
-    public const string PluginVersion = "0.2.0";
+    public const string PluginVersion = "0.3.0";
 
     internal static Plugin          Instance { get; private set; } = null!;
     internal static ManualLogSource Log      { get; private set; } = null!;
@@ -37,7 +37,8 @@ public class Plugin : BaseUnityPlugin
     internal MissionJournalConfig     Cfg     { get; private set; } = null!;
 
     private Harmony _harmony = null!;
-    private LifecyclePersistence? _lifecycle;
+    private IJournalPersistence? _lifecycle;
+    private string? _lastPersistenceStatus;
 
     // Reflection-resolved once — MapElement.<guid>k__BackingField on the
     // player's current POI -> system.
@@ -92,7 +93,7 @@ public class Plugin : BaseUnityPlugin
             || !LifecyclePersistence.IsCompatible(apiPlugin.Metadata.Version, api))
         {
             enabled = false;
-            Log.LogError("Requires VGModAPI 0.1.x with available session-lifecycle and save-outcomes; journal disabled without touching sidecars.");
+            Log.LogError("Requires VGModAPI 0.1.2+ within 0.1.x with available session-lifecycle and save-outcomes; journal disabled without touching sidecars.");
             return;
         }
         Store.RecordingAllowed = () => _lifecycle?.CanRecord == true;
@@ -109,7 +110,11 @@ public class Plugin : BaseUnityPlugin
             _harmony.PatchAll(typeof(MissionAbandonPatch));
             _harmony.PatchAll(typeof(MissionArchivePatch));
 
-            _lifecycle = new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
+            bool coordinated = Config.Bind("Persistence", "UseCoordinatedPersistence", false, "Experimental; requires explicitly enabled VGModAPI persistence.").Value;
+            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Explicit read-only adoption when no coordinated data exists for this owner; historical snapshot consistency is not inferred.").Value;
+            _lifecycle = coordinated
+                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("Coordinated persistence unavailable; no legacy fallback."), Store, importLegacy, message => Log.LogWarning(message))
+                : new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
             MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);
             var patchCount = _harmony.GetPatchedMethods().Count();
             Log.LogInfo($"{PluginName} v{PluginVersion} loaded ({patchCount} patched method(s))");
@@ -123,6 +128,15 @@ public class Plugin : BaseUnityPlugin
             _harmony?.UnpatchSelf();
             Log.LogError($"Journal initialization failed; persistence disabled: {error}");
         }
+    }
+
+    private void Update()
+    {
+        if (_lifecycle is not CoordinatedPersistence coordinated) return;
+        var status = coordinated.Status;
+        if (status == _lastPersistenceStatus) return;
+        _lastPersistenceStatus = status;
+        Log.LogInfo("Coordinated journal persistence status: " + status);
     }
 
     private void OnDestroy()
