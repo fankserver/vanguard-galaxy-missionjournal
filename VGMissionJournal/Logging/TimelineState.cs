@@ -11,4 +11,5 @@ public enum TimelineState
     Completed,
     Failed,
     Abandoned,
+    Removed,
 }

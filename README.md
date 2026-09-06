@@ -11,8 +11,8 @@ Consumers (future stats dashboards, LLM-driven NPCs, progression mods, etc.) sof
 ## Install
 
 1. Install BepInEx 5 for Vanguard Galaxy.
-2. Install the experimental [VGModAPI 0.1.2+ (0.1.x)](https://github.com/fankserver/vanguard-galaxy-api) package once. Keep its three DLLs together; do not duplicate Abstractions in consumer folders.
-3. Extract the journal archive into `BepInEx/plugins/`, including its bundled Newtonsoft.Json and notices. Version 0.3.0 requires API 0.1.2 or newer within 0.1.x; BepInEx refuses a missing/too-old dependency. Unsupported API series or unavailable lifecycle/save capabilities disable the journal with a log message, without touching sidecars.
+2. Install the experimental [VGModAPI 0.1.8+ (0.1.x)](https://github.com/fankserver/vanguard-galaxy-api) package once. Keep its three DLLs together; do not duplicate Abstractions in consumer folders.
+3. Extract the journal archive into `BepInEx/plugins/`, including its bundled Newtonsoft.Json and notices. Version 0.4.0 requires API 0.1.8 or newer within 0.1.x; BepInEx refuses a missing/too-old dependency. Unsupported API series or unavailable lifecycle/save capabilities disable the journal with a log message, without touching sidecars.
 4. Launch the game. On a successful observed save, a paired `<saveName>.save.vgmissionjournal.json` appears next to the vanilla `.save` file.
 
 Config lives at `<GameDir>/BepInEx/config/vgmissionjournal.cfg` after first run:

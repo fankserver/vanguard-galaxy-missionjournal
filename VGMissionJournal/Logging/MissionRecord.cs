@@ -9,7 +9,7 @@ namespace VGMissionJournal.Logging;
 /// once on <see cref="TimelineState.Accepted"/> and never mutate — vanilla
 /// doesn't change a mission after generation. The <see cref="Timeline"/>
 /// is the mutable part: it grows by one entry on each lifecycle transition
-/// and terminates with exactly one of Completed / Failed / Abandoned.
+/// and terminates with Completed / Failed / Abandoned, or neutral Removed.
 ///
 /// <para><b>Identifiers.</b> <see cref="StoryId"/> is populated for authored
 /// story missions (Tutorial, Puppeteers); for generator-produced missions

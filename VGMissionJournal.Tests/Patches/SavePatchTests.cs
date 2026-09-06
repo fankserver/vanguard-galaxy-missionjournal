@@ -21,6 +21,7 @@ public class SavePatchTests
     {
         var dependency = Assert.Single(typeof(Plugin).GetCustomAttributes<BepInDependency>());
         Assert.Equal("vgmodapi", dependency.DependencyGUID);
+        Assert.Equal(new System.Version(0, 1, 8), dependency.MinimumVersion);
         Assert.Equal(BepInDependency.DependencyFlags.HardDependency, dependency.Flags);
     }
 }
