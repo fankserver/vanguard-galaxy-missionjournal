@@ -27,6 +27,16 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
 
     private void Restore(SessionSnapshot session, byte[]? payload, bool importLegacy)
     {
+        try { RestoreCore(session, payload, importLegacy); }
+        catch (Exception error)
+        {
+            _warn("Journal save-data restore failed: " + error.GetType().Name + ": " + error.Message);
+            throw;
+        }
+    }
+
+    private void RestoreCore(SessionSnapshot session, byte[]? payload, bool importLegacy)
+    {
         _store.LoadFrom(Array.Empty<MissionRecord>());
         bool imported = false;
         if (payload == null && session.SavePath != null)
