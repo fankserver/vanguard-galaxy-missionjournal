@@ -16,5 +16,5 @@ public sealed record TimelineEntry(
     /// read it via the C# API; the sidecar stores only <see cref="State"/>.</summary>
     [JsonIgnore]
     public bool IsTerminal =>
-        State is TimelineState.Completed or TimelineState.Failed or TimelineState.Abandoned;
+        State is TimelineState.Completed or TimelineState.Failed or TimelineState.Abandoned or TimelineState.Removed;
 }

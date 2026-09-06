@@ -25,7 +25,7 @@ public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid    = "vgmissionjournal";
     public const string PluginName    = "Vanguard Galaxy Mission Journal";
-    public const string PluginVersion = "0.3.0";
+    public const string PluginVersion = "0.4.0";
 
     internal static Plugin          Instance { get; private set; } = null!;
     internal static ManualLogSource Log      { get; private set; } = null!;
@@ -38,6 +38,7 @@ public class Plugin : BaseUnityPlugin
 
     private Harmony _harmony = null!;
     private IJournalPersistence? _lifecycle;
+    private ApiMissionObserver? _missionObserver;
     private string? _lastPersistenceStatus;
 
     // Reflection-resolved once — MapElement.<guid>k__BackingField on the
@@ -96,7 +97,8 @@ public class Plugin : BaseUnityPlugin
             Log.LogError("Requires VGModAPI 0.1.2+ within 0.1.x with available session-lifecycle and save-outcomes; journal disabled without touching sidecars.");
             return;
         }
-        Store.RecordingAllowed = () => _lifecycle?.CanRecord == true;
+        Store.RecordingAllowed = () => _lifecycle?.CanRecord == true && (_missionObserver == null ||
+            (!_missionObserver.Faulted && api!.Capabilities.Any(c => c.Name == "mission-transitions" && c.Available)));
         try
         {
             Log.LogWarning("Using experimental VGModAPI lifecycle; full runtime qualification remains pending.");
@@ -104,17 +106,34 @@ public class Plugin : BaseUnityPlugin
 
             // Finish domain binding before subscribing or restoring any sidecar.
             _harmony = new Harmony(PluginGuid);
-            _harmony.PatchAll(typeof(MissionAcceptPatch));
-            _harmony.PatchAll(typeof(MissionCompletePatch));
-            _harmony.PatchAll(typeof(MissionFailPatch));
-            _harmony.PatchAll(typeof(MissionAbandonPatch));
-            _harmony.PatchAll(typeof(MissionArchivePatch));
+            bool apiMissions = Config.Bind("Missions", "UseApiMissionEvents", false, "Use verified VGModAPI mission events and saved identities; requires API-managed save data and enabled mission identity continuity.").Value;
+            if (!apiMissions)
+            {
+                _harmony.PatchAll(typeof(MissionAcceptPatch));
+                _harmony.PatchAll(typeof(MissionCompletePatch));
+                _harmony.PatchAll(typeof(MissionFailPatch));
+                _harmony.PatchAll(typeof(MissionAbandonPatch));
+                _harmony.PatchAll(typeof(MissionArchivePatch));
+            }
 
             bool coordinated = Config.Bind("Persistence", "UseCoordinatedPersistence", false, "Experimental; requires explicitly enabled VGModAPI persistence.").Value;
             bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Explicit read-only adoption when no coordinated data exists for this owner; historical snapshot consistency is not inferred.").Value;
+            if (apiMissions && (!coordinated || apiPlugin.Metadata.Version < new Version(0, 1, 7)
+                || !api!.Capabilities.Any(c => c.Name == "mission-transitions" && c.Available)
+                || !api.Capabilities.Any(c => c.Name == "mission-continuity" && c.Available)))
+                throw new InvalidOperationException("API mission events require VGModAPI 0.1.7+, enabled mission events/identity continuity and API-managed save data; no direct-hook fallback.");
             _lifecycle = coordinated
                 ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("Coordinated persistence unavailable; no legacy fallback."), Store, importLegacy, message => Log.LogWarning(message))
                 : new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
+            if (apiMissions)
+            {
+                var events = ModApi.Missions ?? throw new InvalidOperationException("Mission events unavailable.");
+                var native = events as IVersionSensitiveMissionAccess ?? throw new InvalidOperationException("Read-only mission inspection unavailable.");
+                _missionObserver = new ApiMissionObserver(events, Store, () => Store.RecordingAllowed?.Invoke() == true,
+                    snapshot => Builder.CreateFromAccept(InspectMission(native, snapshot)) with { MissionName = snapshot.Name, StoryId = snapshot.DefinitionId ?? string.Empty },
+                    (record, state, snapshot) => Builder.AppendTransition(record, state, InspectMission(native, snapshot)),
+                    message => Log.LogWarning(message), () => _lifecycle?.Dispose());
+            }
             MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);
             var patchCount = _harmony.GetPatchedMethods().Count();
             Log.LogInfo($"{PluginName} v{PluginVersion} loaded ({patchCount} patched method(s))");
@@ -123,6 +142,7 @@ public class Plugin : BaseUnityPlugin
         {
             enabled = false;
             MissionJournalApi.Current = null;
+            _missionObserver?.Dispose();
             _lifecycle?.Dispose();
             _lifecycle = null;
             _harmony?.UnpatchSelf();
@@ -130,8 +150,22 @@ public class Plugin : BaseUnityPlugin
         }
     }
 
+    private static Source.MissionSystem.Mission InspectMission(IVersionSensitiveMissionAccess access, MissionSnapshot snapshot)
+    {
+        if (access.TryGetNative(snapshot, out var value) && value is Source.MissionSystem.Mission mission) return mission;
+        throw new InvalidOperationException("Exact dispatched mission inspection unavailable.");
+    }
+
     private void Update()
     {
+        if (_missionObserver != null && (_missionObserver.Faulted || ModApi.Current?.Capabilities.Any(c => c.Name == "mission-transitions" && c.Available) != true))
+        {
+            _missionObserver.Dispose(); _missionObserver = null;
+            _lifecycle?.Dispose(); _lifecycle = null;
+            MissionJournalApi.Current = null;
+            Log.LogError("Mission history stopped; save data writes disabled until restart.");
+            enabled = false; return;
+        }
         if (_lifecycle is not CoordinatedPersistence coordinated) return;
         var status = coordinated.Status;
         if (status == _lastPersistenceStatus) return;
@@ -142,6 +176,7 @@ public class Plugin : BaseUnityPlugin
     private void OnDestroy()
     {
         MissionJournalApi.Current = null;
+        _missionObserver?.Dispose();
         _lifecycle?.Dispose();
         _harmony?.UnpatchSelf();
     }

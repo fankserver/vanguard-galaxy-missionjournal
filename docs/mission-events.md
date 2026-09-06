@@ -1,0 +1,13 @@
+# API mission events (experimental)
+
+`[Missions] UseApiMissionEvents = true` selects verified VGModAPI events instead of the journal's five direct mission patches. It requires API 0.1.7+, enabled API mission events and identity continuity, and API-managed save data. Missing capabilities stop initialization; this mode does not silently fall back to direct hooks.
+
+Accepted records use the API occurrence GUID. Repeated definitions stay separate. Completion, failure and abandonment reflect the API's witnessed outcomes, not successful method returns. Neutral removal creates a `Removed` terminal timeline entry with no claimed outcome; it is neither failure nor abandonment. Archive notifications do not invent completion or duplicate its timeline entry.
+
+The journal remains **acceptance-first history**. Restoration does not create an Accepted entry. A later outcome updates a saved record only when its exact occurrence GUID exists. Missing or ambiguous correspondence, old imported history with unrelated IDs, and evicted acceptance records cannot be matched by name, definition or ordinal. Such outcomes are logged as missing acceptance history and omitted rather than manufacturing a timestamp or acceptance event. Existing imported history remains intact and queryable. An active journal record means no terminal event was recorded, not proof of present vanilla membership; ambiguous correspondence can leave an unresolved historical record. `Restored` events need no deferred write: the saved record is looked up when a later outcome arrives, after save-data restoration.
+
+Native mission details are inspected only during the exact API callback and immediately copied by the existing record builder. Native objects are not retained or mutated. Name and definition identity come from the immutable event snapshot; structural/reward details from the explicitly version-sensitive native view can reflect later nested changes.
+
+Unavailable save data prevents recording. Inspection errors stop this observer and immediately unregister its save-data owner, protecting against publication of incomplete history. Owner removal pauses shared saving until a fresh session; restart is required to reinitialize the journal observer. These controls do not claim full runtime qualification.
+
+The payload shape remains JournalSchema 3; `Removed` is an additional timeline state. Existing acceptance/outcome records and their identifiers are not rewritten. Older journal releases cannot read the new `Removed` string state; do not downgrade a save-data reader after recording it. Naming/default onboarding changes are tracked separately in API issue #62.
