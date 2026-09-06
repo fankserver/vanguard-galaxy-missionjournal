@@ -36,6 +36,16 @@ public sealed class CoordinatedPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void SaveWithoutLegacyHistoryStartsEmptyWithoutImport()
+    {
+        var api = new FakeApi(); var store = new MissionStore();
+        using var controller = new CoordinatedPersistence(api, store, false, _ => { });
+        api.Provider!.Restore(Session(Path.Combine(_root, "new.save")), null);
+        Assert.Empty(JournalPayloadCodec.Decode(api.Provider.Capture()).Missions);
+        Assert.False(Directory.Exists(_root));
+    }
+
+    [Fact]
     public void LegacyImportIsExplicitReadOnlyAndNeverWritesOnCapture()
     {
         Directory.CreateDirectory(_root);
@@ -43,7 +53,7 @@ public sealed class CoordinatedPersistenceTests : IDisposable
         var sidecar = JournalPathResolver.From(save); var original = JsonPayload(); File.WriteAllBytes(sidecar, original);
         var store = new MissionStore(); var api = new FakeApi();
         using (var disabled = new CoordinatedPersistence(api, store, false, _ => { }))
-        { api.Provider!.Restore(Session(save), null); Assert.Empty(store.AllMissions); }
+        { Assert.Throws<InvalidDataException>(() => api.Provider!.Restore(Session(save), null)); Assert.Empty(store.AllMissions); Assert.Equal(original, File.ReadAllBytes(sidecar)); }
         using var enabled = new CoordinatedPersistence(api, store, true, _ => { });
         api.Provider!.Restore(Session(save), null);
         Assert.Equal("kept", Assert.Single(store.AllMissions).MissionInstanceId);

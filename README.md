@@ -4,7 +4,7 @@ A BepInEx 5 plugin that observes instrumented mission transitions — acceptance
 
 ## Design principle: pure observer
 
-VGMissionJournal does not intentionally mutate vanilla state. Default journal persistence is a separate sidecar write; opt-in coordinated persistence is also not an atomic transaction with the game save. Compatibility with arbitrary mods is not guaranteed.
+VGMissionJournal does not intentionally mutate vanilla state. API-managed journal saves are enabled by default; legacy saves use a separate file. Neither mode is an atomic transaction with the game save. Compatibility with arbitrary mods is not guaranteed.
 
 Consumers (future stats dashboards, LLM-driven NPCs, progression mods, etc.) soft-dep via reflection on a stable API surface. Consumers bucket and interpret; VGMissionJournal records what the game hands it and nothing more.
 
@@ -72,11 +72,11 @@ Domain mission Harmony hooks remain, including completion/archive coordination. 
 
 Schema and public query signatures are unchanged. In default legacy mode, missing/corrupt sidecars retain the existing empty-store/quarantine policy. A sidecar error cannot turn vanilla success into a rollback. These are narrow lifecycle guarantees, not universal UI readiness or complete runtime qualification.
 
-### Experimental coordinated mode
+### API-managed journal saves (default, experimental)
 
-After explicitly enabling VGModAPI persistence, set `[Persistence] UseCoordinatedPersistence = true` in `vgmissionjournal.cfg`. There is no silent fallback if the service is unavailable. In this mode the logical JournalSchema v3 is preserved in a bounded gzip payload (`VGJ1`, owner format 1) inside the API envelope; no legacy sidecars are written or swept. Capture reads an internal snapshot even while public recording/query gates are closed during callbacks. Recording resumes only when the registration grants mutation; faults and removal remain fail-closed and status changes are logged.
+API-managed saves are enabled by default in VGModAPI and this mod. Set `[Persistence] UseApiSaveData = false` in `vgmissionjournal.cfg` to use legacy save files. The draft setting `UseCoordinatedPersistence` has been replaced; it is no longer read. There is no silent fallback if the service is unavailable. In this mode the logical JournalSchema v3 is preserved in a bounded gzip payload (`VGJ1`, owner format 1) inside the API envelope; no legacy sidecars are written or swept. Capture reads an internal snapshot even while public recording/query gates are closed during callbacks. Recording resumes only when the registration grants mutation; faults and removal remain fail-closed and status changes are logged.
 
-`ImportLegacySidecars = true` separately opts into read-only adoption when the API supplies no coordinated data for this owner. Leave it false unless you explicitly accept the old file as the intended history: legacy filenames do not prove snapshot consistency. Corrupt, future-version, unreadable or over-16-MiB JSON sources block restoration without quarantine or overwrite. Existing files remain untouched; no other mod's or account-wide history is imported. The coordinated payload limit is 1 MiB compressed and 16 MiB decompressed JSON; neither limit permits truncation. Histories exceeding either bound require retaining legacy mode. Full owner acceptance and native coordinated consumer qualification remain separate gates.
+`ImportLegacySidecars = true` separately opts into read-only adoption when the API has no journal data for this game save. If a legacy file exists and import is disabled, restoration stops with instructions rather than starting an empty journal. Leave it false unless you explicitly accept the old file as the intended history: legacy filenames do not prove snapshot consistency. Corrupt, future-version, unreadable or over-16-MiB JSON sources block restoration without quarantine or overwrite. Existing files remain untouched; no other mod's or account-wide history is imported. The API save-data limit is 1 MiB compressed and 16 MiB decompressed JSON; neither limit permits truncation. Histories exceeding either bound require retaining legacy mode. Full owner acceptance and native API-managed save qualification remain separate gates.
 
 ## Build
 

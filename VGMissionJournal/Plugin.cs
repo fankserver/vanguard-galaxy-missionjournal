@@ -25,7 +25,7 @@ public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid    = "vgmissionjournal";
     public const string PluginName    = "Vanguard Galaxy Mission Journal";
-    public const string PluginVersion = "0.3.0";
+    public const string PluginVersion = "0.3.1";
 
     internal static Plugin          Instance { get; private set; } = null!;
     internal static ManualLogSource Log      { get; private set; } = null!;
@@ -110,10 +110,10 @@ public class Plugin : BaseUnityPlugin
             _harmony.PatchAll(typeof(MissionAbandonPatch));
             _harmony.PatchAll(typeof(MissionArchivePatch));
 
-            bool coordinated = Config.Bind("Persistence", "UseCoordinatedPersistence", false, "Experimental; requires explicitly enabled VGModAPI persistence.").Value;
-            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Explicit read-only adoption when no coordinated data exists for this owner; historical snapshot consistency is not inferred.").Value;
+            bool coordinated = Config.Bind("Persistence", "UseApiSaveData", true, "Use API-managed journal saves. Experimental; disable to use legacy save files.").Value;
+            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Read existing journal files when no API-managed journal data exists. Sources remain untouched; matching the old history to this game save is your choice.").Value;
             _lifecycle = coordinated
-                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("Coordinated persistence unavailable; no legacy fallback."), Store, importLegacy, message => Log.LogWarning(message))
+                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("API-managed saves unavailable; legacy saves are not selected automatically."), Store, importLegacy, message => Log.LogWarning(message))
                 : new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
             MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);
             var patchCount = _harmony.GetPatchedMethods().Count();
@@ -136,7 +136,7 @@ public class Plugin : BaseUnityPlugin
         var status = coordinated.Status;
         if (status == _lastPersistenceStatus) return;
         _lastPersistenceStatus = status;
-        Log.LogInfo("Coordinated journal persistence status: " + status);
+        Log.LogInfo("Journal save-data status: " + status);
     }
 
     private void OnDestroy()
