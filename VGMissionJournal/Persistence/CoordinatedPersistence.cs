@@ -27,15 +27,26 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
 
     private void Restore(SessionSnapshot session, byte[]? payload, bool importLegacy)
     {
+        try { RestoreCore(session, payload, importLegacy); }
+        catch (Exception error)
+        {
+            _warn("Journal save-data restore failed: " + error.GetType().Name + ": " + error.Message);
+            throw;
+        }
+    }
+
+    private void RestoreCore(SessionSnapshot session, byte[]? payload, bool importLegacy)
+    {
         _store.LoadFrom(Array.Empty<MissionRecord>());
         bool imported = false;
-        if (payload == null && importLegacy && session.SavePath != null)
+        if (payload == null && session.SavePath != null)
         {
             var path = JournalPathResolver.From(session.SavePath);
             try
             {
                 using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-                if (file.Length > JournalPayloadCodec.MaxJsonBytes) throw new InvalidDataException("Legacy journal exceeds coordinated limit.");
+                if (!importLegacy) throw new InvalidDataException("Existing journal save data found. Enable ImportLegacySidecars to read it, or disable UseApiSaveData to keep legacy saves.");
+                if (file.Length > JournalPayloadCodec.MaxJsonBytes) throw new InvalidDataException("Legacy journal exceeds the API save-data size limit.");
                 payload = JournalPayloadCodec.ReadBounded(file);
                 imported = true;
             }
