@@ -116,14 +116,14 @@ public class Plugin : BaseUnityPlugin
                 _harmony.PatchAll(typeof(MissionArchivePatch));
             }
 
-            bool coordinated = Config.Bind("Persistence", "UseCoordinatedPersistence", false, "Experimental; requires explicitly enabled VGModAPI persistence.").Value;
-            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Explicit read-only adoption when no coordinated data exists for this owner; historical snapshot consistency is not inferred.").Value;
+            bool coordinated = Config.Bind("Persistence", "UseApiSaveData", true, "Use API-managed journal saves. Experimental; disable to use legacy save files.").Value;
+            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Read existing journal files when no API-managed journal data exists. Sources remain untouched; matching the old history to this game save is your choice.").Value;
             if (apiMissions && (!coordinated || apiPlugin.Metadata.Version < new Version(0, 1, 7)
                 || !api!.Capabilities.Any(c => c.Name == "mission-transitions" && c.Available)
                 || !api.Capabilities.Any(c => c.Name == "mission-continuity" && c.Available)))
                 throw new InvalidOperationException("API mission events require VGModAPI 0.1.7+, enabled mission events/identity continuity and API-managed save data; no direct-hook fallback.");
             _lifecycle = coordinated
-                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("Coordinated persistence unavailable; no legacy fallback."), Store, importLegacy, message => Log.LogWarning(message))
+                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("API-managed saves unavailable. Enable [Persistence] Enabled in vgmodapi.cfg and check API errors, or set [Persistence] UseApiSaveData = false in vgmissionjournal.cfg for legacy saves."), Store, importLegacy, message => Log.LogWarning(message))
                 : new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
             if (apiMissions)
             {
@@ -170,7 +170,7 @@ public class Plugin : BaseUnityPlugin
         var status = coordinated.Status;
         if (status == _lastPersistenceStatus) return;
         _lastPersistenceStatus = status;
-        Log.LogInfo("Coordinated journal persistence status: " + status);
+        Log.LogInfo("Journal save-data status: " + status);
     }
 
     private void OnDestroy()

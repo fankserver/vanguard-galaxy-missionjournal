@@ -36,14 +36,30 @@ public sealed class CoordinatedPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void SaveWithoutLegacyHistoryStartsEmptyWithoutImport()
+    {
+        var api = new FakeApi(); var store = new MissionStore();
+        using var controller = new CoordinatedPersistence(api, store, false, _ => { });
+        api.Provider!.Restore(Session(Path.Combine(_root, "new.save")), null);
+        Assert.Empty(JournalPayloadCodec.Decode(api.Provider.Capture()).Missions);
+        Assert.False(Directory.Exists(_root));
+    }
+
+    [Fact]
     public void LegacyImportIsExplicitReadOnlyAndNeverWritesOnCapture()
     {
         Directory.CreateDirectory(_root);
         var save = Path.Combine(_root, "fixture.save");
         var sidecar = JournalPathResolver.From(save); var original = JsonPayload(); File.WriteAllBytes(sidecar, original);
         var store = new MissionStore(); var api = new FakeApi();
-        using (var disabled = new CoordinatedPersistence(api, store, false, _ => { }))
-        { api.Provider!.Restore(Session(save), null); Assert.Empty(store.AllMissions); }
+        string? warning = null;
+        using (var disabled = new CoordinatedPersistence(api, store, false, message => warning = message))
+        {
+            Assert.Throws<InvalidDataException>(() => api.Provider!.Restore(Session(save), null));
+            Assert.Contains("ImportLegacySidecars", warning!);
+            Assert.Contains("UseApiSaveData", warning!);
+            Assert.Empty(store.AllMissions); Assert.Equal(original, File.ReadAllBytes(sidecar));
+        }
         using var enabled = new CoordinatedPersistence(api, store, true, _ => { });
         api.Provider!.Restore(Session(save), null);
         Assert.Equal("kept", Assert.Single(store.AllMissions).MissionInstanceId);
@@ -92,7 +108,7 @@ public sealed class CoordinatedPersistenceTests : IDisposable
         api.Provider.Restore(Session(Path.Combine(_root, "absent", "fixture.save")), null);
         Assert.Empty(store.AllMissions); Assert.Equal(0, warnings);
         Assert.ThrowsAny<Exception>(() => api.Provider.Restore(Session(save), null));
-        Assert.Equal(0, warnings);
+        Assert.Equal(1, warnings);
     }
 
     [Fact]

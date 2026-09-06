@@ -17,18 +17,18 @@ internal static class JournalPayloadCodec
     internal static byte[] Encode(JournalSchema schema)
     {
         var json = Utf8.GetBytes(JsonConvert.SerializeObject(schema, JournalSchema.SerializerSettings));
-        if (json.Length > MaxJsonBytes) throw new InvalidDataException("Journal JSON exceeds coordinated limit.");
+        if (json.Length > MaxJsonBytes) throw new InvalidDataException("Journal JSON exceeds API save-data size limit.");
         using var output = new MemoryStream();
         output.Write(new byte[] { 86, 71, 74, 49 }, 0, 4);
         using (var gzip = new GZipStream(output, CompressionLevel.Fastest, true)) gzip.Write(json, 0, json.Length);
-        if (output.Length > MaxEnvelopePayload) throw new InvalidDataException("Compressed journal exceeds owner payload limit.");
+        if (output.Length > MaxEnvelopePayload) throw new InvalidDataException("Compressed journal exceeds API save-data size limit.");
         return output.ToArray();
     }
 
     internal static JournalSchema Decode(byte[] payload)
     {
         if (payload.Length > MaxEnvelopePayload || payload.Length < 22 || payload[0] != 86 || payload[1] != 71 || payload[2] != 74 || payload[3] != 49)
-            throw new InvalidDataException("Invalid journal owner payload.");
+            throw new InvalidDataException("Invalid journal save data.");
         using var input = new MemoryStream(payload, 4, payload.Length - 4, false);
         using var gzip = new GZipStream(input, CompressionMode.Decompress);
         var json = ReadBounded(gzip);
@@ -45,7 +45,7 @@ internal static class JournalPayloadCodec
         int read;
         while ((read = source.Read(chunk, 0, chunk.Length)) > 0)
         {
-            if (buffer.Length + read > MaxJsonBytes) throw new InvalidDataException("Journal JSON exceeds coordinated limit.");
+            if (buffer.Length + read > MaxJsonBytes) throw new InvalidDataException("Journal JSON exceeds API save-data size limit.");
             buffer.Write(chunk, 0, read);
         }
         return buffer.ToArray();
@@ -53,7 +53,7 @@ internal static class JournalPayloadCodec
 
     internal static JournalSchema DecodeJson(byte[] json)
     {
-        if (json.Length > MaxJsonBytes) throw new InvalidDataException("Journal JSON exceeds coordinated limit.");
+        if (json.Length > MaxJsonBytes) throw new InvalidDataException("Journal JSON exceeds API save-data size limit.");
         var schema = JsonConvert.DeserializeObject<JournalSchema>(Utf8.GetString(json), JournalSchema.SerializerSettings);
         if (schema == null || schema.Version != JournalSchema.CurrentVersion || schema.Missions == null)
             throw new InvalidDataException("Unsupported or invalid journal schema.");
