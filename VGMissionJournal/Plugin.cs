@@ -131,7 +131,7 @@ public class Plugin : BaseUnityPlugin
                 var native = events as IVersionSensitiveMissionAccess ?? throw new InvalidOperationException("Read-only mission inspection unavailable.");
                 _missionObserver = new ApiMissionObserver(events, Store, () => Store.RecordingAllowed?.Invoke() == true,
                     snapshot => Builder.CreateFromAccept(InspectMission(native, snapshot)) with { MissionName = snapshot.Name, StoryId = snapshot.DefinitionId ?? string.Empty },
-                    (record, state, snapshot) => Builder.AppendTransition(record, state, InspectMission(native, snapshot)),
+                    (record, state, snapshot) => Builder.AppendTransition(record, state, state == TimelineState.Completed ? InspectMission(native, snapshot) : null),
                     message => Log.LogWarning(message), () => _lifecycle?.Dispose());
             }
             MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);

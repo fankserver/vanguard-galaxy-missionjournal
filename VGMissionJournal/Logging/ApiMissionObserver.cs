@@ -14,6 +14,7 @@ internal sealed class ApiMissionObserver : IDisposable
     private readonly Action? _stop;
     private readonly IDisposable _subscription;
     private bool _disposed;
+    private bool _unavailableLogged;
     internal bool Faulted { get; private set; }
 
     internal ApiMissionObserver(IMissionEvents events, MissionStore store, Func<bool> ready,
@@ -28,7 +29,22 @@ internal sealed class ApiMissionObserver : IDisposable
         if (_disposed || Faulted) return;
         // Restored is correspondence, not acceptance; persistent records are looked up only on a later witnessed outcome.
         if (transition.Kind == MissionTransitionKind.Restored || transition.Kind == MissionTransitionKind.Archived) return;
-        if (!_ready()) { _log("Mission transition not recorded while save data is unavailable."); return; }
+        TimelineState? state = transition.Kind switch
+        {
+            MissionTransitionKind.Completed => TimelineState.Completed,
+            MissionTransitionKind.Failed => TimelineState.Failed,
+            MissionTransitionKind.Abandoned => TimelineState.Abandoned,
+            MissionTransitionKind.Removed => TimelineState.Removed,
+            _ => null
+        };
+        if (transition.Kind != MissionTransitionKind.Accepted && state == null)
+        { _log("Unsupported mission event ignored."); return; }
+        if (!_ready())
+        {
+            if (!_unavailableLogged) _log("Mission transition not recorded while save data is unavailable.");
+            _unavailableLogged = true; return;
+        }
+        _unavailableLogged = false;
         try
         {
             var snapshot = transition.Mission;
@@ -45,15 +61,7 @@ internal sealed class ApiMissionObserver : IDisposable
                 return;
             }
             if (!existing.IsActive) return;
-            var state = transition.Kind switch
-            {
-                MissionTransitionKind.Completed => TimelineState.Completed,
-                MissionTransitionKind.Failed => TimelineState.Failed,
-                MissionTransitionKind.Abandoned => TimelineState.Abandoned,
-                MissionTransitionKind.Removed => TimelineState.Removed,
-                _ => throw new InvalidOperationException("Unsupported mission transition.")
-            };
-            _store.Upsert(_append(existing, state, snapshot));
+            _store.Upsert(_append(existing, state!.Value, snapshot));
         }
         catch (Exception error) { Faulted = true; _stop?.Invoke(); _log("Mission history observer stopped: " + error.Message); }
     }

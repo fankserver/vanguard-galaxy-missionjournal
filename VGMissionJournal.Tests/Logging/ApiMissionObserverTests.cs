@@ -16,6 +16,14 @@ public sealed class ApiMissionObserverTests
         public IDisposable Subscribe(string owner, Action<MissionTransition> callback) { _callback = callback; return this; }
         internal void Send(Guid id, MissionTransitionKind kind) => _callback?.Invoke(new MissionTransition(kind,
             new MissionSnapshot(Guid.NewGuid(), id, "repeated-definition", "mission", Array.Empty<string>(), kind == MissionTransitionKind.Accepted), ++_sequence));
+        internal void SendFuture(Guid id)
+        {
+            var value = new MissionTransition(MissionTransitionKind.Accepted,
+                new MissionSnapshot(Guid.NewGuid(), id, null, "mission", Array.Empty<string>(), false), ++_sequence);
+            // A newer producer can define values rejected by this test reference's constructor.
+            typeof(MissionTransition).GetField("<Kind>k__BackingField", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(value, (MissionTransitionKind)999);
+            _callback?.Invoke(value);
+        }
         public void Dispose() => _callback = null;
     }
     private static ApiMissionObserver Observer(Events events, MissionStore store, Action<string>? log = null, Func<bool>? ready = null)
@@ -77,6 +85,25 @@ public sealed class ApiMissionObserverTests
         var events = new Events(); var store = new MissionStore(); var observer = Observer(events, store, ready: () => false);
         events.Send(Guid.NewGuid(), MissionTransitionKind.Accepted); observer.Dispose(); events.Send(Guid.NewGuid(), MissionTransitionKind.Accepted);
         Assert.Empty(store.AllMissions);
+    }
+    [Fact]
+    public void FutureEventDoesNotFaultOrChangeKnownHistory()
+    {
+        var events = new Events(); var store = new MissionStore(); var logs = new List<string>();
+        using var observer = Observer(events, store, logs.Add);
+        var id = Guid.NewGuid(); events.Send(id, MissionTransitionKind.Accepted); events.SendFuture(id);
+        Assert.False(observer.Faulted); Assert.Single(store.GetByInstanceId(id.ToString())!.Timeline);
+        Assert.Contains("Unsupported", Assert.Single(logs));
+        events.Send(id, MissionTransitionKind.Completed); Assert.Equal(Outcome.Completed, store.GetByInstanceId(id.ToString())!.Outcome);
+    }
+    [Fact]
+    public void UnavailableWarningsAreBoundedUntilReadinessIsObservedAgain()
+    {
+        bool ready = false; var events = new Events(); var store = new MissionStore(); var logs = new List<string>();
+        using var observer = Observer(events, store, logs.Add, () => ready);
+        for (int i = 0; i < 10; i++) events.Send(Guid.NewGuid(), MissionTransitionKind.Accepted);
+        Assert.Single(logs); ready = true; events.Send(Guid.NewGuid(), MissionTransitionKind.Accepted);
+        ready = false; events.Send(Guid.NewGuid(), MissionTransitionKind.Accepted); Assert.Equal(2, logs.Count);
     }
     [Fact]
     public void InspectionFailureImmediatelyStopsSaveDataAndFutureObservations()
