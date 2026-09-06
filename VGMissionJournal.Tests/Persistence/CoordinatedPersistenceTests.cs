@@ -14,7 +14,9 @@ public sealed class CoordinatedPersistenceTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "journal-coord-" + Guid.NewGuid().ToString("N"));
     private static SessionSnapshot Session(string? path = null) => new(Guid.NewGuid(), SessionPhase.PlayerReady, path == null ? SessionOrigin.NewGame : SessionOrigin.SaveLoad, path);
-    private static byte[] Payload() => Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new JournalSchema(3, new[] { TestRecords.Record(instanceId: "kept") }), JournalSchema.SerializerSettings));
+    private static JournalSchema Schema() => new(3, new[] { TestRecords.Record(instanceId: "kept") });
+    private static byte[] JsonPayload() => Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(Schema(), JournalSchema.SerializerSettings));
+    private static byte[] Payload() => JournalPayloadCodec.Encode(Schema());
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 
     [Fact]
@@ -38,7 +40,7 @@ public sealed class CoordinatedPersistenceTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         var save = Path.Combine(_root, "fixture.save");
-        var sidecar = JournalPathResolver.From(save); var original = Payload(); File.WriteAllBytes(sidecar, original);
+        var sidecar = JournalPathResolver.From(save); var original = JsonPayload(); File.WriteAllBytes(sidecar, original);
         var store = new MissionStore(); var api = new FakeApi();
         using (var disabled = new CoordinatedPersistence(api, store, false, _ => { }))
         { api.Provider!.Restore(Session(save), null); Assert.Empty(store.AllMissions); }
@@ -98,13 +100,40 @@ public sealed class CoordinatedPersistenceTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         var save = Path.Combine(_root, "fixture.save"); var path = JournalPathResolver.From(save);
-        var oversized = new string('x', 1024 * 1024 + 1); File.WriteAllText(path, oversized);
+        var oversized = new string('x', JournalPayloadCodec.MaxJsonBytes + 1); File.WriteAllText(path, oversized);
         var api = new FakeApi(); var store = new MissionStore();
         using var controller = new CoordinatedPersistence(api, store, true, _ => { });
         Assert.Throws<InvalidDataException>(() => api.Provider!.Restore(Session(save), null));
         Assert.Equal(oversized, File.ReadAllText(path));
         store.LoadFrom(new[] { TestRecords.Record(instanceId: oversized) });
-        Assert.False(api.Provider!.Validate(api.Provider.Capture()));
+        Assert.Throws<InvalidDataException>(() => api.Provider!.Capture());
+    }
+
+    [Fact]
+    public void LargeLogicalHistoryRoundtripsBoundedlyWithoutTruncation()
+    {
+        var records = new VGMissionJournal.Logging.MissionRecord[2000];
+        for (int i = 0; i < records.Length; i++) records[i] = TestRecords.Record(instanceId: i + new string('x', 2500));
+        var schema = new JournalSchema(3, records);
+        var json = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(schema, JournalSchema.SerializerSettings));
+        Assert.True(json.Length > 1024 * 1024);
+        var encoded = JournalPayloadCodec.Encode(schema);
+        Assert.True(encoded.Length <= 1024 * 1024);
+        var restored = JournalPayloadCodec.Decode(encoded);
+        Assert.Equal(json, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(restored, JournalSchema.SerializerSettings)));
+        Assert.False(JournalPayloadCodec.IsValid(encoded[..^1]));
+        Assert.False(JournalPayloadCodec.IsValid(JsonPayload()));
+    }
+
+    [Fact]
+    public void CompressionDoesNotBypassEitherSizeLimit()
+    {
+        var random = new byte[2 * 1024 * 1024]; new Random(42).NextBytes(random);
+        Assert.Throws<InvalidDataException>(() => JournalPayloadCodec.Encode(new JournalSchema(3, new[] { TestRecords.Record(instanceId: Convert.ToBase64String(random)) })));
+        using var output = new MemoryStream(); output.Write(new byte[] { 86, 71, 74, 49 });
+        using (var gzip = new System.IO.Compression.GZipStream(output, System.IO.Compression.CompressionLevel.Fastest, true))
+            gzip.Write(new byte[JournalPayloadCodec.MaxJsonBytes + 1]);
+        Assert.False(JournalPayloadCodec.IsValid(output.ToArray()));
     }
 
     private sealed class FakeApi : IPersistenceApi
