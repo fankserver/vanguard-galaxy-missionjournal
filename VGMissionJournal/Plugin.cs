@@ -113,7 +113,7 @@ public class Plugin : BaseUnityPlugin
             bool coordinated = Config.Bind("Persistence", "UseApiSaveData", true, "Use API-managed journal saves. Experimental; disable to use legacy save files.").Value;
             bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Read existing journal files when no API-managed journal data exists. Sources remain untouched; matching the old history to this game save is your choice.").Value;
             _lifecycle = coordinated
-                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("API-managed saves unavailable; legacy saves are not selected automatically."), Store, importLegacy, message => Log.LogWarning(message))
+                ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("API-managed saves unavailable. Enable [Persistence] Enabled in vgmodapi.cfg and check API errors, or set [Persistence] UseApiSaveData = false in vgmissionjournal.cfg for legacy saves."), Store, importLegacy, message => Log.LogWarning(message))
                 : new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));
             MissionJournalApi.Current = new MissionJournalQueryAdapter(Store);
             var patchCount = _harmony.GetPatchedMethods().Count();
