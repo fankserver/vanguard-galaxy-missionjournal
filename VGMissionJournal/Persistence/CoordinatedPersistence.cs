@@ -56,6 +56,7 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
     private void Restore(SessionSnapshot session, byte[]? payload, bool importLegacy)
     {
         _store.LoadFrom(Array.Empty<MissionRecord>());
+        bool imported = false;
         if (payload == null && importLegacy && session.SavePath != null)
         {
             var path = JournalPathResolver.From(session.SavePath);
@@ -72,11 +73,13 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
                     buffer.Write(chunk, 0, read);
                 }
                 payload = buffer.ToArray();
-                _warn("Explicit legacy journal import: source remains untouched; no historical snapshot matching is inferred.");
+                imported = true;
             }
             catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
         }
         if (payload != null) _store.LoadFrom(Decode(payload).Missions);
+        if (imported) _warn("Explicit legacy journal import: source remains untouched; no historical snapshot matching is inferred.");
     }
 
     public void Dispose()

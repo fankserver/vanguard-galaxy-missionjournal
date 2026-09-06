@@ -111,7 +111,7 @@ public class Plugin : BaseUnityPlugin
             _harmony.PatchAll(typeof(MissionArchivePatch));
 
             bool coordinated = Config.Bind("Persistence", "UseCoordinatedPersistence", false, "Experimental; requires explicitly enabled VGModAPI persistence.").Value;
-            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Explicit read-only adoption when no coordinated generation exists; historical snapshot consistency is not inferred.").Value;
+            bool importLegacy = Config.Bind("Persistence", "ImportLegacySidecars", false, "Explicit read-only adoption when no coordinated data exists for this owner; historical snapshot consistency is not inferred.").Value;
             _lifecycle = coordinated
                 ? new CoordinatedPersistence(ModApi.Persistence ?? throw new InvalidOperationException("Coordinated persistence unavailable; no legacy fallback."), Store, importLegacy, message => Log.LogWarning(message))
                 : new LifecyclePersistence(api!, Store, Io, message => Log.LogWarning(message));

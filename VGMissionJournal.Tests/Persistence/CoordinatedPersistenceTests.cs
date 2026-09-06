@@ -77,6 +77,36 @@ public sealed class CoordinatedPersistenceTests : IDisposable
         Assert.True(api.Handle.Disposed); Assert.False(controller.CanRecord); Assert.Empty(store.AllMissions);
     }
 
+    [Fact]
+    public void KnownPayloadWinsOverLegacyAndMissingDirectoryMeansNoImport()
+    {
+        Directory.CreateDirectory(_root);
+        var save = Path.Combine(_root, "fixture.save"); var path = JournalPathResolver.From(save);
+        File.WriteAllText(path, "broken");
+        var api = new FakeApi(); var store = new MissionStore(); int warnings = 0;
+        using var controller = new CoordinatedPersistence(api, store, true, _ => warnings++);
+        api.Provider!.Restore(Session(save), Payload());
+        Assert.Single(store.AllMissions); Assert.Equal(0, warnings); Assert.Equal("broken", File.ReadAllText(path));
+        api.Provider.Restore(Session(Path.Combine(_root, "absent", "fixture.save")), null);
+        Assert.Empty(store.AllMissions); Assert.Equal(0, warnings);
+        Assert.ThrowsAny<Exception>(() => api.Provider.Restore(Session(save), null));
+        Assert.Equal(0, warnings);
+    }
+
+    [Fact]
+    public void OversizedImportIsPreservedAndOversizedCaptureIsRejected()
+    {
+        Directory.CreateDirectory(_root);
+        var save = Path.Combine(_root, "fixture.save"); var path = JournalPathResolver.From(save);
+        var oversized = new string('x', 1024 * 1024 + 1); File.WriteAllText(path, oversized);
+        var api = new FakeApi(); var store = new MissionStore();
+        using var controller = new CoordinatedPersistence(api, store, true, _ => { });
+        Assert.Throws<InvalidDataException>(() => api.Provider!.Restore(Session(save), null));
+        Assert.Equal(oversized, File.ReadAllText(path));
+        store.LoadFrom(new[] { TestRecords.Record(instanceId: oversized) });
+        Assert.False(api.Provider!.Validate(api.Provider.Capture()));
+    }
+
     private sealed class FakeApi : IPersistenceApi
     {
         internal PersistenceProvider? Provider;
