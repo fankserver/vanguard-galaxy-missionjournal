@@ -1,6 +1,6 @@
 # API mission events (experimental)
 
-`[Missions] UseApiMissionEvents = true` selects verified VGModAPI events instead of the journal's five direct mission patches. It requires API 0.1.7+, enabled API mission events and identity continuity, and API-managed save data. Missing capabilities stop initialization; this mode does not silently fall back to direct hooks.
+`[Missions] UseApiMissionEvents = true` selects verified VGModAPI events instead of the journal's five direct mission patches. It requires API 0.1.8+, enabled API mission events and identity continuity, and API-managed save data. Missing capabilities stop initialization; this mode does not silently fall back to direct hooks.
 
 Accepted records use the API occurrence GUID. Repeated definitions stay separate. Completion, failure and abandonment reflect the API's witnessed outcomes, not successful method returns. Neutral removal creates a `Removed` terminal timeline entry with no claimed outcome; it is neither failure nor abandonment. Archive notifications do not invent completion or duplicate its timeline entry.
 
@@ -10,4 +10,4 @@ Native mission details are inspected only during the exact API callback and imme
 
 Unavailable save data prevents recording. Inspection errors stop this observer and immediately unregister its save-data owner, protecting against publication of incomplete history. Owner removal pauses shared saving until a fresh session; restart is required to reinitialize the journal observer. These controls do not claim full runtime qualification.
 
-The payload shape remains JournalSchema 3; `Removed` is an additional timeline state. Existing acceptance/outcome records and their identifiers are not rewritten. Older journal releases cannot read the new `Removed` string state; do not downgrade a save-data reader after recording it. Naming/default onboarding changes are tracked separately in API issue #62.
+The payload shape remains JournalSchema 3; `Removed` is an additional timeline state. Existing acceptance/outcome records and their identifiers are not rewritten. Older journal releases cannot read the new `Removed` string state; do not downgrade a save-data reader after recording it. Save data is enabled by default; importing existing legacy files remains an explicit choice. Version 0.4 requires API 0.1.8 even when direct mission hooks are selected, because its compiled plugin uses the newer mission API.
