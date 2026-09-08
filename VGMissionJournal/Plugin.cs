@@ -24,7 +24,7 @@ namespace VGMissionJournal;
 public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid    = "vgmissionjournal";
-    public const string PluginName    = "Vanguard Galaxy Mission Journal";
+    public const string PluginName    = "Mission Journal";
     public const string PluginVersion = "0.4.0";
 
     internal static Plugin          Instance { get; private set; } = null!;
