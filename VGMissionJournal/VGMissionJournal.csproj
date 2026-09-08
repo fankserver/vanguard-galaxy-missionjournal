@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>VGMissionJournal</AssemblyName>
-    <Product>Vanguard Galaxy Mission Journal</Product>
+    <Product>Mission Journal</Product>
     <Version>0.4.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
