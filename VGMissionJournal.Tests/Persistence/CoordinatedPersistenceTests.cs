@@ -221,6 +221,37 @@ public sealed class CoordinatedPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void ImportOverCapTrialsThePostEvictionSetNotTheRawFile()
+    {
+        // A legacy journal whose FULL set exceeds the compressed envelope but
+        // whose post-Eviction set (store cap) fits must import: capture would
+        // only ever publish the capped set.
+        Directory.CreateDirectory(_root);
+        var save = Path.Combine(_root, "fixture.save"); var path = JournalPathResolver.From(save);
+        var rng = new Random(11);
+        string Big() { var b = new byte[600_000]; rng.NextBytes(b); return Convert.ToBase64String(b); }
+        var schema = new JournalSchema(3, new[]
+        {
+            TestRecords.Record(instanceId: "old-" + Big(), acceptedAt: 1),
+            TestRecords.Record(instanceId: "new-" + Big(), acceptedAt: 2),
+        });
+        var raw = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(schema, JournalSchema.SerializerSettings));
+        Assert.True(raw.Length <= JournalPayloadCodec.MaxJsonBytes);
+        // Sanity: the two-record set exceeds the envelope, the surviving one does not.
+        Assert.Throws<InvalidDataException>(() => JournalPayloadCodec.Encode(schema));
+        File.WriteAllBytes(path, raw);
+        var api = new FakeSaveDataService();
+        var store = new MissionStore(maxMissions: 1);
+        using var controller = Create(api, store, true, _ => { });
+        api.Provider!.Restore(Session(save), null);   // must not throw
+        Assert.Single(store.AllMissions);
+        var captured = JournalPayloadCodec.Decode(api.Provider.Capture());
+        var kept = Assert.Single(captured.Missions);
+        Assert.StartsWith("new-", kept.MissionInstanceId);
+        Assert.Equal(raw, File.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void ImportThatCannotReEncodeIsRefusedAtImportTimeAndSourcePreserved()
     {
         // A legacy file inside the 16 MiB JSON limit but over the 1 MiB

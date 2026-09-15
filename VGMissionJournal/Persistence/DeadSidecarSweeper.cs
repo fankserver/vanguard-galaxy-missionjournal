@@ -5,7 +5,7 @@ using System.IO;
 namespace VGMissionJournal.Persistence;
 
 /// <summary>
-/// Startup-time cleanup of sidecars whose vanilla save file has been
+/// Cleanup of sidecars (for an observed save directory) whose vanilla save file has been
 /// removed outside the game (manual deletion, save-manager tooling).
 /// Prevents unbounded accumulation across a player's Steam cloud dir.
 ///

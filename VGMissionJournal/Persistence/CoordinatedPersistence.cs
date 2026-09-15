@@ -74,19 +74,21 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
         if (payload != null)
         {
             var schema = imported ? JournalPayloadCodec.DecodeJson(payload) : JournalPayloadCodec.Decode(payload);
+            _store.LoadFrom(schema.Missions);
             if (imported)
             {
                 // Fail at import time rather than wedging the coordinator at the
                 // first save: a legacy file that decodes but cannot re-encode
                 // inside the API envelope would abort capture for every
-                // registered owner. The untouched source stays legacy-only.
-                try { JournalPayloadCodec.Encode(new JournalSchema(JournalSchema.CurrentVersion, schema.Missions)); }
-                catch (Exception error)
+                // registered owner. Validate exactly what capture will publish
+                // (post-eviction), so a store cap cannot cause a false refusal.
+                try { JournalPayloadCodec.Encode(new JournalSchema(JournalSchema.CurrentVersion, _store.CaptureRecords())); }
+                catch (Exception error)   // codec size refusals are InvalidDataException; anything else must not leave an unpublishable store loaded
                 {
-                    throw new InvalidDataException("Legacy journal cannot fit the API-managed save-data limits; keep it in legacy mode ([Persistence] UseApiSaveData = false).", error);
+                    _store.LoadFrom(Array.Empty<MissionRecord>());
+                    throw new InvalidDataException("Legacy journal cannot fit the API-managed save-data limits; keep it in legacy mode ([Persistence] UseApiSaveData = false). Detail: " + error.Message, error);
                 }
             }
-            _store.LoadFrom(schema.Missions);
         }
         if (imported) _warn("Explicit legacy journal import: source remains untouched; no historical snapshot matching is inferred.");
     }

@@ -102,7 +102,7 @@ All filters that accept a time window (`sinceGameSeconds`, `untilGameSeconds`) a
 | Method | Return | Purpose |
 |---|---|---|
 | `GetMission(missionInstanceId)` | `MissionRecord?` | Single mission by its instance id, or `null` when not found. |
-| `GetActiveMissions()` | `IReadOnlyList<MissionRecord>` | Missions that have not yet reached a terminal state (Completed / Failed / Abandoned). |
+| `GetActiveMissions()` | `IReadOnlyList<MissionRecord>` | Missions that have not yet reached a terminal state (Completed / Failed / Abandoned / Removed). |
 | `GetAllMissions()` | `IReadOnlyList<MissionRecord>` | All missions in the journal, no filter. |
 | `GetMissionsInSystem(systemId, since?, until?)` | `IReadOnlyList<MissionRecord>` | Missions whose `SourceSystemId` matches. Missions without a source system are excluded. |
 | `GetMissionsByFaction(factionId, since?, until?)` | `IReadOnlyList<MissionRecord>` | Missions whose `SourceFaction` matches. |
@@ -144,8 +144,8 @@ Captured once on acceptance and never mutate — vanilla doesn't change a missio
 
 | Property | Type | Notes |
 |---|---|---|
-| `StoryId` | `string` | Vanilla `Mission.storyId`. **Empty for most missions** — vanilla only populates it for authored story arcs (Tutorial, Puppeteers). Use `MissionInstanceId` for correlating across the accept→complete lifecycle when `StoryId` is empty. |
-| `MissionInstanceId` | `string` | Session-local GUID synthesized per `Mission` instance. Stable within a session; does *not* survive save/load — vanilla rebuilds mission objects on load, so a mission accepted in one session and finished in another carries different ids. |
+| `StoryId` | `string` | The API event's definition id (immutable snapshot value). **Empty for most missions** — vanilla only populates it for authored story arcs (Tutorial, Puppeteers). Use `MissionInstanceId` for correlating across the accept→complete lifecycle when `StoryId` is empty. |
+| `MissionInstanceId` | `string` | The API occurrence GUID for the accepted mission. Cross-save/load correspondence comes from the API's mission identity continuity (unique serialized fingerprint match); uncorrelated or ambiguous occurrences get fresh session-local ids and cannot be matched by name, definition or ordinal. |
 | `MissionName` | `string?` | Display name when the mission has one; `null` otherwise. |
 | `MissionSubclass` | `string` | Raw `mission.GetType().Name`. One of `"Mission"` (parametric missions — salvage, courier, trade, etc.), `"BountyMission"`, `"IndustryMission"`, `"PatrolMission"`, `"StoryMission"`. |
 | `MissionLevel` | `int` | Currently always `0` — see [Known gaps](#known-gaps). |
