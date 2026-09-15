@@ -48,7 +48,7 @@ public sealed class CoordinatedPersistenceTests : IDisposable
     {
         var api = new FakeSaveDataService { ScriptedRefusal = new SaveDataRegistrationResult(status, null, "operator-readable detail") };
         var store = new MissionStore();
-        var error = Assert.Throws<InvalidOperationException>(() => Create(api, store, false, _ => { }));
+        var error = Assert.Throws<InvalidOperationException>(() => Create(api, store, false, _ => { }, _lifecycle));
         Assert.Contains("refused", error.Message);
         Assert.Contains(status.ToString(), error.Message);
         Assert.Contains("operator-readable detail", error.Message);
@@ -218,6 +218,28 @@ public sealed class CoordinatedPersistenceTests : IDisposable
         Assert.Equal(oversized, File.ReadAllText(path));
         store.LoadFrom(new[] { TestRecords.Record(instanceId: oversized) });
         Assert.Throws<InvalidDataException>(() => api.Provider!.Capture());
+    }
+
+    [Fact]
+    public void ImportThatCannotReEncodeIsRefusedAtImportTimeAndSourcePreserved()
+    {
+        // A legacy file inside the 16 MiB JSON limit but over the 1 MiB
+        // compressed envelope must be refused at import, not admitted and
+        // then wedge coordinated capture for every owner at the first save.
+        Directory.CreateDirectory(_root);
+        var save = Path.Combine(_root, "fixture.save"); var path = JournalPathResolver.From(save);
+        var rng = new byte[1_500_000]; new Random(7).NextBytes(rng);
+        var raw = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(
+            new JournalSchema(3, new[] { TestRecords.Record(instanceId: Convert.ToBase64String(rng)) }), JournalSchema.SerializerSettings));
+        Assert.True(raw.Length <= JournalPayloadCodec.MaxJsonBytes);
+        File.WriteAllBytes(path, raw);
+        var api = new FakeSaveDataService(); var store = new MissionStore(); string? warning = null;
+        using var controller = Create(api, store, true, message => warning = message);
+        Assert.Throws<InvalidDataException>(() => api.Provider!.Restore(Session(save), null));
+        Assert.Contains("API-managed save-data limits", warning);
+        Assert.Contains("UseApiSaveData", warning);
+        Assert.Empty(store.AllMissions);
+        Assert.Equal(raw, File.ReadAllBytes(path));
     }
 
     [Fact]

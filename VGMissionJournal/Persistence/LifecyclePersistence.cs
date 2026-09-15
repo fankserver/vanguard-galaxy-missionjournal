@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using VGModAPI;
 using VGMissionJournal.Logging;
 
@@ -64,7 +63,12 @@ internal sealed class LifecyclePersistence : IJournalPersistence
             || _ready != e.Session.Id || !CanRecord) return;
         try
         {
-            _io.Write(JournalPathResolver.From(e.Destination), new JournalSchema(JournalSchema.CurrentVersion, _store.AllMissions.ToArray()));
+            // Capture the ungated internal snapshot (like the coordinated
+            // capture path): the plugin-level recording gate can close between
+            // an availability flip and observer teardown, and a vanilla save
+            // in that window must not persist a zero-mission journal over
+            // existing history.
+            _io.Write(JournalPathResolver.From(e.Destination), new JournalSchema(JournalSchema.CurrentVersion, _store.CaptureRecords()));
         }
         catch (Exception ex) { _warn("Journal write failed after vanilla save success: " + ex); }
     }

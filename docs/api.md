@@ -104,7 +104,7 @@ All filters that accept a time window (`sinceGameSeconds`, `untilGameSeconds`) a
 | `GetMission(missionInstanceId)` | `MissionRecord?` | Single mission by its instance id, or `null` when not found. |
 | `GetActiveMissions()` | `IReadOnlyList<MissionRecord>` | Missions that have not yet reached a terminal state (Completed / Failed / Abandoned). |
 | `GetAllMissions()` | `IReadOnlyList<MissionRecord>` | All missions in the journal, no filter. |
-| `GetMissionsInSystem(systemId, since?, until?)` | `IReadOnlyList<MissionRecord>` | Missions whose `SourceSystemId` matches. Missions without a source system (synthesized archive backstops) are excluded. |
+| `GetMissionsInSystem(systemId, since?, until?)` | `IReadOnlyList<MissionRecord>` | Missions whose `SourceSystemId` matches. Missions without a source system are excluded. |
 | `GetMissionsByFaction(factionId, since?, until?)` | `IReadOnlyList<MissionRecord>` | Missions whose `SourceFaction` matches. |
 | `GetMissionsByMissionSubclass(subclass, since?, until?)` | `IReadOnlyList<MissionRecord>` | Exact match on `MissionSubclass` (= `mission.GetType().Name`) — e.g. `"BountyMission"`, `"PatrolMission"`, `"IndustryMission"`, `"Mission"`. Case-sensitive. |
 | `GetMissionsByOutcome(outcome, since?, until?)` | `IReadOnlyList<MissionRecord>` | `outcome` is an `Outcome` enum value (`Outcome.Completed` / `Outcome.Failed` / `Outcome.Abandoned`). Active missions never match. |
@@ -207,11 +207,11 @@ Read all rewards off `Rewards` by `Type`.
 
 | Property | Type | Meaning |
 |---|---|---|
-| `State` | `TimelineState` enum | One of `Accepted`, `Completed`, `Failed`, `Abandoned`. |
+| `State` | `TimelineState` enum | One of `Accepted`, `Completed`, `Failed`, `Abandoned`, `Removed`. |
 | `GameSeconds` | `double` | In-game clock at the transition. |
 | `RealUtc` | `string?` | ISO-8601 wall-clock. Stamped on `Accepted` and terminal entries; `null` on any interior entries that may be added in a future version. |
 
-A mission's timeline always starts with exactly one `Accepted` entry and ends with at most one terminal entry (Completed / Failed / Abandoned). An active mission has no terminal entry.
+A mission's timeline always starts with exactly one `Accepted` entry and ends with at most one terminal entry (Completed / Failed / Abandoned / Removed). `Removed` is a neutral membership observation: neither failure nor abandonment, and `Outcome` stays `null` for it. An active mission has no terminal entry.
 
 Derived helpers on `MissionRecord`:
 

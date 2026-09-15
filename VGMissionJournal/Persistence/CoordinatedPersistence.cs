@@ -71,7 +71,23 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
             catch (FileNotFoundException) { }
             catch (DirectoryNotFoundException) { }
         }
-        if (payload != null) _store.LoadFrom((imported ? JournalPayloadCodec.DecodeJson(payload) : JournalPayloadCodec.Decode(payload)).Missions);
+        if (payload != null)
+        {
+            var schema = imported ? JournalPayloadCodec.DecodeJson(payload) : JournalPayloadCodec.Decode(payload);
+            if (imported)
+            {
+                // Fail at import time rather than wedging the coordinator at the
+                // first save: a legacy file that decodes but cannot re-encode
+                // inside the API envelope would abort capture for every
+                // registered owner. The untouched source stays legacy-only.
+                try { JournalPayloadCodec.Encode(new JournalSchema(JournalSchema.CurrentVersion, schema.Missions)); }
+                catch (Exception error)
+                {
+                    throw new InvalidDataException("Legacy journal cannot fit the API-managed save-data limits; keep it in legacy mode ([Persistence] UseApiSaveData = false).", error);
+                }
+            }
+            _store.LoadFrom(schema.Missions);
+        }
         if (imported) _warn("Explicit legacy journal import: source remains untouched; no historical snapshot matching is inferred.");
     }
 

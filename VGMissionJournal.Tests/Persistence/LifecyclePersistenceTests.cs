@@ -36,7 +36,21 @@ public sealed class LifecyclePersistenceTests : IDisposable
 
     [Fact]
     public void SubscribesBeforeReadingCurrentState()
-        => Assert.Equal(1, _api.SubscriberCount);
+    {
+        Assert.Equal(1, _api.SubscriberCount);
+
+        // Contract: subscribe, THEN read CurrentSession. Pre-set a ready
+        // session and attach a fresh controller: its first CurrentSession
+        // read must observe the already-registered subscription.
+        var path = Save("preread");
+        _io.Write(JournalPathResolver.From(path), new JournalSchema(JournalSchema.CurrentVersion, new[] { TestRecords.Record(instanceId: "preread") }));
+        var lateApi = new FakeLifecycleService();
+        var session = new SessionSnapshot(Guid.NewGuid(), SessionPhase.PlayerReady, SessionOrigin.SaveLoad, path);
+        lateApi.CurrentSession = session;
+        Assert.Equal(-1, lateApi.FirstReadSubscriberCount);
+        using var late = new LifecyclePersistence(lateApi, new MissionStore(), _io, _ => { });
+        Assert.Equal(1, lateApi.FirstReadSubscriberCount);
+    }
 
     [Fact]
     public void RestoresOnlyAfterReadiness()
@@ -70,6 +84,19 @@ public sealed class LifecyclePersistenceTests : IDisposable
         var s = Ready(Save("source")); var destination = Save("target");
         _store.Upsert(TestRecords.Record()); Outcome(s, destination, kind);
         Assert.False(File.Exists(JournalPathResolver.From(destination)));
+    }
+
+    [Fact]
+    public void ClosedPluginGateDoesNotEmptyLegacySaveWrites()
+    {
+        // Mission-service availability is a plugin-level gate; a save
+        // observed between the availability flip and the observer teardown
+        // must persist the full history, not the gate-emptied view.
+        var destination = Save("gated"); var s = Ready(Save("source"));
+        _store.Upsert(TestRecords.Record(instanceId: "kept"));
+        _store.RecordingAllowed = () => false;
+        Outcome(s, destination);
+        Assert.Equal("kept", Assert.Single(_io.Read(JournalPathResolver.From(destination)).Schema!.Missions).MissionInstanceId);
     }
 
     [Fact]

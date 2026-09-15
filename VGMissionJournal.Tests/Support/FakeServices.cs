@@ -24,7 +24,21 @@ internal sealed class FakeLifecycleService : ILifecycleService
 
     public IServiceStatus SessionTracking { get; set; } = new FakeStatus();
     public IServiceStatus SaveOutcomes { get; set; } = new FakeStatus();
-    public SessionSnapshot? CurrentSession { get; set; }
+
+    private SessionSnapshot? _currentSession;
+    /// <summary>Subscriber count observed at the FIRST read of
+    /// CurrentSession — lets tests verify consumers subscribe before
+    /// reading current state (service-contracts.md). -1 = never read.</summary>
+    internal int FirstReadSubscriberCount { get; private set; } = -1;
+    public SessionSnapshot? CurrentSession
+    {
+        get
+        {
+            if (FirstReadSubscriberCount < 0) FirstReadSubscriberCount = _handlers.Count;
+            return _currentSession;
+        }
+        set => _currentSession = value;
+    }
 
     public event Action<LifecycleEvent>? Changed
     {

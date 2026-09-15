@@ -32,13 +32,15 @@ MaxMissions = 2000
 
 | Timeline state | Recorded when | Confidence |
 |---|---|---|
-| **Accepted**  | Player accepts a mission (vanilla's `GamePlayer.AddMissionWithLog`)              | load-bearing |
-| **Completed** | Player turns in a mission (vanilla's `GamePlayer.CompleteMission`) + rewards    | load-bearing |
-| **Failed**    | Mission fail condition triggers (vanilla's `Mission.MissionFailed`)             | load-bearing |
-| **Abandoned** | Player drops a mission (vanilla's `RemoveMission(_, completed:false)`)          | load-bearing |
-| *(Archived backstop)* | Synthesized Completed for unusual paths (dev cheats, swallow errors) | backstop |
+| **Accepted**  | The API witnesses mission acceptance (`MissionTransitionKind.Accepted`)          | load-bearing |
+| **Completed** | The API witnesses reward-claim completion (`Completed`); rewards re-extracted from the dispatched view | load-bearing |
+| **Failed**    | The API witnesses a failure (`Failed`)                                           | load-bearing |
+| **Abandoned** | The API witnesses abandonment (`Abandoned`)                                      | load-bearing |
+| **Removed**   | Neutral membership removal (`Removed`) — neither failure nor abandonment; no claimed outcome | load-bearing |
 
-Every captured mission carries: in-game accept timestamp + wall-clock, storyId, a session-local mission instance id (for correlating across the accept→complete lifecycle when `storyId` is empty), mission name + raw subclass name (`mission.GetType().Name`), source station / system / faction, a full snapshot of the step/objective tree (type per objective), a unified rewards list covering all 14 vanilla reward subtypes, a timeline of state transitions (Accepted → Completed/Failed/Abandoned), and a player-state snapshot. Consumers bucket by subclass / objective type if they want categories; VGMissionJournal does not classify.
+`Restored` and `Archived` transitions are deliberately not recorded: restoration is identity correspondence, not acceptance, and archive notifications never invent completion or duplicate its timeline entry.
+
+Every captured mission carries: in-game accept timestamp + wall-clock, storyId (from the event definition id), the API occurrence id (correlated across save/load by the API's mission identity continuity), mission name + raw subclass name (`mission.GetType().Name` via the version-sensitive dispatch view), source station / system / faction, a full snapshot of the step/objective tree (type per objective), a unified rewards list covering all 14 vanilla reward subtypes, a timeline of state transitions (Accepted → Completed/Failed/Abandoned/Removed), and a player-state snapshot. Consumers bucket by subclass / objective type if they want categories; VGMissionJournal does not classify.
 
 See [`docs/api.md`](docs/api.md) for the full mission schema and method reference.
 

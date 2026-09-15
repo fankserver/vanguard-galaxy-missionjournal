@@ -27,7 +27,7 @@ internal static class VanillaReflection
         value = null;
         var field = type.GetField(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         if (field != null) { value = field.GetValue(null); return true; }
-        var prop = type.GetProperty(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        var prop = SafeProperty(() => type.GetProperty(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic));
         if (prop is { CanRead: true } && prop.GetIndexParameters().Length == 0)
         {
             try { value = prop.GetValue(null); return true; }
@@ -66,7 +66,7 @@ internal static class VanillaReflection
             }
         }
 
-        var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+        var property = SafeProperty(() => type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public));
         if (property is { CanRead: true } && property.GetIndexParameters().Length == 0)
         {
             try { value = property.GetValue(target); return true; }
@@ -74,6 +74,15 @@ internal static class VanillaReflection
         }
         value = null;
         return false;
+    }
+
+    /// <summary>Reflection member lookup itself can throw (e.g.
+    /// AmbiguousMatchException when a derived game type re-declares a name);
+    /// the reader contract is absence, never an escape.</summary>
+    private static PropertyInfo? SafeProperty(Func<PropertyInfo?> lookup)
+    {
+        try { return lookup(); }
+        catch { return null; }
     }
 
     public static string? GetString(object? target, string name) =>
