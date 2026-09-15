@@ -3,7 +3,7 @@ using VGModAPI;
 
 namespace VGMissionJournal.Logging;
 
-/// <summary>Projects witnessed outcomes into the journal's acceptance-first history. Never synthesizes acceptance on load.</summary>
+/// <summary>Projects witnessed API transitions into the journal's acceptance-first history. Never synthesizes acceptance on load.</summary>
 internal sealed class ApiMissionObserver : IDisposable
 {
     private readonly MissionStore _store;
@@ -12,17 +12,19 @@ internal sealed class ApiMissionObserver : IDisposable
     private readonly Func<MissionRecord, TimelineState, MissionSnapshot, MissionRecord> _append;
     private readonly Action<string> _log;
     private readonly Action? _stop;
-    private readonly IDisposable _subscription;
+    private readonly IMissionService _missions;
+    private bool _subscribed;
     private bool _disposed;
     private bool _unavailableLogged;
     internal bool Faulted { get; private set; }
 
-    internal ApiMissionObserver(IMissionEvents events, MissionStore store, Func<bool> ready,
+    internal ApiMissionObserver(IMissionService missions, MissionStore store, Func<bool> ready,
         Func<MissionSnapshot, MissionRecord> accept,
         Func<MissionRecord, TimelineState, MissionSnapshot, MissionRecord> append, Action<string> log, Action? stop = null)
     {
-        _store = store; _ready = ready; _accept = accept; _append = append; _log = log; _stop = stop;
-        _subscription = events.Subscribe("vgmissionjournal", Receive);
+        _missions = missions; _store = store; _ready = ready; _accept = accept; _append = append; _log = log; _stop = stop;
+        _missions.Transitioned += Receive;
+        _subscribed = true;
     }
     private void Receive(MissionTransition transition)
     {
@@ -65,5 +67,10 @@ internal sealed class ApiMissionObserver : IDisposable
         }
         catch (Exception error) { Faulted = true; _stop?.Invoke(); _log("Mission history observer stopped: " + error.Message); }
     }
-    public void Dispose() { if (_disposed) return; _disposed = true; _subscription.Dispose(); }
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (_subscribed) { _missions.Transitioned -= Receive; _subscribed = false; }
+    }
 }

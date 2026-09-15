@@ -13,7 +13,7 @@ namespace VGMissionJournal.Tests.Persistence;
 public sealed class LifecyclePersistenceTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "journal-lifecycle-" + Guid.NewGuid().ToString("N"));
-    private readonly FakeApi _api = new();
+    private readonly FakeLifecycleService _api = new();
     private readonly MissionStore _store = new();
     private readonly JournalIO _io = new(() => DateTime.UtcNow);
     private readonly LifecyclePersistence _controller;
@@ -33,6 +33,10 @@ public sealed class LifecyclePersistenceTests : IDisposable
     }
     private void Outcome(SessionSnapshot? session, string destination, LifecycleEventKind kind = LifecycleEventKind.SaveSucceeded)
         => _api.Emit(new LifecycleEvent(kind, session, Guid.NewGuid(), destination), updateCurrent: false);
+
+    [Fact]
+    public void SubscribesBeforeReadingCurrentState()
+        => Assert.Equal(1, _api.SubscriberCount);
 
     [Fact]
     public void RestoresOnlyAfterReadiness()
@@ -111,18 +115,31 @@ public sealed class LifecyclePersistenceTests : IDisposable
         var s = Ready(Save("source")); _controller.Dispose(); _controller.Dispose();
         var target = Save("disposed"); Outcome(s, target); _store.Upsert(TestRecords.Record());
         Assert.False(File.Exists(JournalPathResolver.From(target))); Assert.Empty(_store.AllMissions);
+        Assert.Equal(0, _api.SubscriberCount); // unsubscribed from Changed
     }
 
     [Theory]
-    [InlineData("0.1.0", false)]
-    [InlineData("0.1.1", false)]
-    [InlineData("0.1.2", true)]
-    [InlineData("0.1.9", true)]
-    [InlineData("0.0.9", false)]
-    [InlineData("0.2.0", false)]
-    [InlineData("1.0.0", false)]
-    public void CompatibilityIsExplicit(string version, bool expected)
-        => Assert.Equal(expected, LifecyclePersistence.IsCompatible(new Version(version), _api));
+    [InlineData(true, true, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    public void CompatibilityRequiresBothTypedServiceViews(bool sessionTracking, bool saveOutcomes, bool expected)
+    {
+        _api.SessionTracking = Available(sessionTracking, "session-tracking");
+        _api.SaveOutcomes = Available(saveOutcomes, "save-outcomes");
+        Assert.Equal(expected, LifecyclePersistence.IsCompatible(_api));
+    }
+
+    private static IServiceStatus Available(bool ok, string feature) =>
+        new FakeStatus { Availability = ok ? ServiceAvailability.Available : new ServiceAvailability(ServiceUnavailableReason.BindingFailed, feature + " binding failed") };
+
+    [Fact]
+    public void MissingOrUnavailableApiIsRejected()
+    {
+        Assert.False(LifecyclePersistence.IsCompatible(null));
+        _api.SessionTracking = new FakeStatus { Availability = new ServiceAvailability(ServiceUnavailableReason.UnsupportedGame, "hash gate") };
+        Assert.False(LifecyclePersistence.IsCompatible(_api));
+    }
 
     [Fact]
     public void LateAttachmentAndQueuedReadinessRestoreOnlyOnce()
@@ -138,30 +155,5 @@ public sealed class LifecyclePersistenceTests : IDisposable
         Assert.Equal(2, store.TotalMissionCount);
     }
 
-    [Fact]
-    public void MissingOrUnavailableApiIsRejected()
-    {
-        Assert.False(LifecyclePersistence.IsCompatible(new Version(0, 1, 2), null));
-        _api.Capabilities = Array.Empty<CapabilityStatus>();
-        Assert.False(LifecyclePersistence.IsCompatible(new Version(0, 1, 2), _api));
-    }
-
     public void Dispose() { _controller.Dispose(); Directory.Delete(_root, true); }
-    private sealed class FakeApi : ILifecycleApi
-    {
-        private readonly List<Action<LifecycleEvent>> _callbacks = new();
-        public SessionSnapshot? CurrentSession { get; set; }
-        public IReadOnlyList<CapabilityStatus> Capabilities { get; set; } = new[] {
-            new CapabilityStatus("session-lifecycle", true, false, "test"), new CapabilityStatus("save-outcomes", true, false, "test") };
-        public IDisposable Subscribe(string owner, Action<LifecycleEvent> callback)
-        { _callbacks.Add(callback); return new Subscription(() => _callbacks.Remove(callback)); }
-        public void Emit(LifecycleEvent e, bool updateCurrent = true)
-        { if (updateCurrent) CurrentSession = e.Session; foreach (var c in _callbacks.ToArray()) c(e); }
-    }
-    private sealed class Subscription : IDisposable
-    {
-        private Action? _dispose;
-        internal Subscription(Action dispose) => _dispose = dispose;
-        public void Dispose() { var d = _dispose; _dispose = null; d?.Invoke(); }
-    }
 }

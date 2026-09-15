@@ -19,18 +19,19 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.*" />
-    <!-- Vanilla types (Mission subclasses, SpaceStation, etc.) surface in our
-         test helpers via the publicized stub, so Unity's reference assemblies
-         must be available for the CLR to resolve them during JIT. -->
+    <!-- The plugin assembly no longer references game or Harmony assemblies; the
+         publicized stub stays OUT of the test project too — builder tests use
+         shape-matched POCO fakes. UnityEngine reference assemblies remain for
+         CLR resolution when the Plugin type (BaseUnityPlugin : MonoBehaviour)
+         is loaded, e.g. by the assembly-reference assertion tests. -->
     <PackageReference Include="UnityEngine.Modules" Version="6000.2.6" />
-    <!-- VGMissionJournal marks BepInEx.Core and HarmonyX IncludeAssets="compile" so
-         their runtime assemblies don't ship in the deployed plugin — the game
+    <!-- VGMissionJournal marks BepInEx.Core IncludeAssets="compile" so the
+         runtime assemblies don't ship in the deployed plugin — the game
          provides them. xUnit DOES need them at runtime when exercising config
          bindings and logging, so pull them in directly here to bypass the
          transitive-assets filter. BepInEx.Core is a meta-package; BepInEx.dll
          itself ships in BaseLib. -->
     <PackageReference Include="BepInEx.BaseLib" Version="5.*" />
-    <PackageReference Include="HarmonyX" Version="2.10.*" />
     <!-- Newtonsoft.Json is also compile-only in VGMissionJournal (game provides
          it), but xUnit needs it at runtime to exercise the persistence
          roundtrip tests in Phase 3. -->
@@ -49,18 +50,6 @@
     <None Update="Fixtures/**/*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Needed because VGMissionJournal internal types surface game types like
-         Mission in their signatures. Shares the same symlinked stub as
-         VGMissionJournal.csproj via `make link-asm`. Unlike the plugin project
-         (Private=false, game provides it at runtime), the test project must
-         copy the stub so xUnit can resolve the types. Conditional so a
-         not-yet-linked checkout still restores. -->
-    <Reference Include="Assembly-CSharp" Condition="Exists('..\VGMissionJournal\lib\Assembly-CSharp.dll')">
-      <HintPath>..\VGMissionJournal\lib\Assembly-CSharp.dll</HintPath>
-    </Reference>
   </ItemGroup>
 
 </Project>

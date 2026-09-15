@@ -76,7 +76,7 @@ Static property on `VGMissionJournal.Api.MissionJournalApi`. Returns an `IMissio
 
 - The plugin isn't installed.
 - BepInEx has loaded the plugin assembly but `Awake` hasn't run yet (rare — consumers that query from their own `Awake` should use the `Chainloader.PluginInfos` guard shown above).
-- The plugin is being torn down (`OnDestroy` nulls the facade before Harmony unpatches).
+- The plugin is being torn down (`OnDestroy` nulls the facade before persistence/observer teardown).
 
 Always null-check.
 

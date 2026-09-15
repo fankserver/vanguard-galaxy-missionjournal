@@ -5,23 +5,40 @@ using VGMissionJournal.Logging;
 
 namespace VGMissionJournal.Persistence;
 
+/// <summary>API-managed save-data persistence: the journal registers a
+/// <see cref="PersistenceProvider"/> with the API save-data coordinator and
+/// never writes save files itself. Recording is gated by the live
+/// registration state; session invalidation clears witnessed history.</summary>
 internal sealed class CoordinatedPersistence : IJournalPersistence
 {
     private readonly MissionStore _store;
-    private readonly IPersistenceRegistration _registration;
+    private readonly ILifecycleService _lifecycle;
+    private readonly ISaveDataRegistration _registration;
     private readonly Action<string> _warn;
+    private Guid? _session;
     private bool _disposed;
 
-    internal CoordinatedPersistence(IPersistenceApi api, MissionStore store, bool importLegacy, Action<string> warn)
+    internal CoordinatedPersistence(ILifecycleService lifecycle, ISaveDataService api, MissionStore store, bool importLegacy, Action<string> warn)
     {
-        _store = store; _warn = warn;
+        _store = store; _warn = warn; _lifecycle = lifecycle;
         _store.LoadFrom(Array.Empty<MissionRecord>());
-        _registration = api.Register(new PersistenceProvider("vgmissionjournal", 1,
+        var result = api.Register(new PersistenceProvider("vgmissionjournal", 1,
             Capture, (session, payload) => Restore(session, payload, importLegacy), JournalPayloadCodec.IsValid));
+        if (!result.Succeeded)
+            throw new InvalidOperationException("Journal save-data registration refused: " + result.Status + ": " + result.Detail);
+        _registration = result.Registration!;
+        try { _lifecycle.Changed += Observe; }
+        catch { _registration.Dispose(); throw; }
     }
 
-    public bool CanRecord => !_disposed && _registration.MutationAllowed;
-    internal string Status => _registration.Status;
+    public bool CanRecord => !_disposed && _registration.CanMutate;
+
+    /// <summary>Result/status diagnostics for log surfacing; branch on
+    /// <see cref="ISaveDataRegistration.State"/>, never this text.</summary>
+    internal string Status => _disposed
+        ? "disposed"
+        : _registration.State.Kind.ToString().ToLowerInvariant()
+          + (_registration.State.Reason == SaveDataBlockReason.None ? "" : ":" + _registration.State.Reason);
 
     private byte[] Capture() => JournalPayloadCodec.Encode(new JournalSchema(JournalSchema.CurrentVersion, _store.CaptureRecords()));
 
@@ -37,6 +54,7 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
 
     private void RestoreCore(SessionSnapshot session, byte[]? payload, bool importLegacy)
     {
+        _session = session.Id;
         _store.LoadFrom(Array.Empty<MissionRecord>());
         bool imported = false;
         if (payload == null && session.SavePath != null)
@@ -57,10 +75,27 @@ internal sealed class CoordinatedPersistence : IJournalPersistence
         if (imported) _warn("Explicit legacy journal import: source remains untouched; no historical snapshot matching is inferred.");
     }
 
+    private void Observe(LifecycleEvent e)
+    {
+        if (_disposed || e.Session == null) return;
+        if (e.Kind is LifecycleEventKind.SessionStarting or LifecycleEventKind.SessionInvalidated or LifecycleEventKind.SessionStartFailed)
+        {
+            if (_session == e.Session.Id || _lifecycle.CurrentSession?.Id == e.Session.Id) Clear();
+        }
+    }
+
+    private void Clear()
+    {
+        _session = null;
+        _store.LoadFrom(Array.Empty<MissionRecord>());
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
-        _registration.Dispose(); _disposed = true;
-        _store.LoadFrom(Array.Empty<MissionRecord>());
+        _registration.Dispose();
+        _lifecycle.Changed -= Observe;
+        Clear();
+        _disposed = true;
     }
 }

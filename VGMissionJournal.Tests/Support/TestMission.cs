@@ -1,36 +1,161 @@
 using System.Collections.Generic;
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using Source.Galaxy;
-using Source.Item;
-using Source.MissionSystem;
-using Source.MissionSystem.Objectives;
-using Source.MissionSystem.Rewards;
 
 namespace VGMissionJournal.Tests.Support;
 
+// Shape-matched POCO fakes for the reflective native-view reads. The
+// journal no longer references the game assembly: MissionRecordBuilder
+// reads members by NAME via VanillaReflection, so these fakes replicate
+// the vanilla member shape (names, field/property kinds, subclass names)
+// without any Assembly-CSharp reference. Type names matter — the builder
+// pattern-matches base-type names (Faction, MapElement, InventoryItemType)
+// and records GetType().Name as the subclass/objective/reward type.
+
+/// <summary>Base mission shape: public storyId/name fields (vanilla
+/// serializes these as fields) plus steps/rewards auto-properties
+/// (vanilla: get-only auto-properties read through their backing fields).</summary>
+internal class Mission
+{
+    public string? storyId;
+    public string? name;
+    public MapPointOfInterest? sourcePoi;
+    public Faction? sourceFaction;
+
+    public List<MissionStep>? steps { get; private set; }
+    public List<MissionReward>? rewards { get; private set; }
+
+    internal void SetSteps(List<MissionStep>? value) => steps = value;
+    internal void SetRewards(List<MissionReward>? value) => rewards = value;
+}
+
+internal sealed class BountyMission : Mission { }
+internal sealed class PatrolMission : Mission { }
+internal sealed class IndustryMission : Mission { }
+
+/// <summary>Base name matched by the builder's MapElement resolution;
+/// <c>guid</c> is an auto-property (vanilla backing-field read), the
+/// display name lives in the private <c>_name</c> field.</summary>
+internal class MapElement
+{
+    public string? guid { get; set; }
+    public MapElement? system;
+#pragma warning disable IDE1006 // matches the vanilla private field name
+    private string? _name;
+#pragma warning restore IDE1006
+    internal void SetPrivateName(string? value) => _name = value;
+}
+
+internal class MapPointOfInterest : MapElement { }
+
+internal class Faction
+{
+    public string? identifier { get; set; }
+}
+
+internal class InventoryItemType
+{
+    public string? identifier { get; set; }
+    public string? name { get; set; }
+}
+
+internal enum ItemCategory
+{
+    None = 0,
+    Weapon = 1,
+    Resource = 2,
+}
+
+internal sealed class MissionStep
+{
+    public string? description { get; set; }
+    public bool requireAllObjectives { get; set; } = true;
+    public bool hidden { get; set; }
+
+    public List<MissionObjective>? objectives { get; private set; }
+
+    internal void SetObjectives(List<MissionObjective>? value) => objectives = value;
+}
+
+internal class MissionObjective
+{
+    public string? statusText { get; set; }       // must be skipped by the builder
+    public string? coreName { get; } = "Core";    // must be skipped (noise)
+    public int currentAmount { get; set; }        // must be skipped (live progress)
+}
+
+internal sealed class KillEnemies : MissionObjective
+{
+    public int requiredAmount;
+    public string? shipType;
+}
+
+#pragma warning disable CS0649 // shape fakes: tests assign these fields directly
+internal sealed class ProtectUnit : MissionObjective
+{
+    public int requiredCount;
+}
+
+internal sealed class TravelToPOI : MissionObjective
+{
+    public MapPointOfInterest? poi;
+}
+
+internal sealed class Mining : MissionObjective
+{
+    public int requiredAmount;
+}
+#pragma warning restore CS0649
+
+internal sealed class CollectItemTypes : MissionObjective
+{
+    public ItemCategory? itemCategory;
+}
+
+internal class MissionReward
+{
+    public string? rewardText { get; set; }   // must be skipped by the builder
+    public string? rewardIcon { get; set; }   // must be skipped
+}
+
+internal sealed class Credits : MissionReward
+{
+    public int amount;
+}
+
+internal sealed class Experience : MissionReward
+{
+    public int amount;
+}
+
+internal sealed class Skillpoint : MissionReward
+{
+    public int amount;
+}
+
+internal sealed class Skilltree : MissionReward
+{
+    public string? treeName;
+}
+
+internal sealed class StoryMission : MissionReward
+{
+    public string? missionId;
+}
+
+internal sealed class Reputation : MissionReward
+{
+    public int amount;
+    public Faction? faction;
+}
+
+internal sealed class ItemReward : MissionReward
+{
+    public InventoryItemType? item;
+}
+
 /// <summary>
-/// Construction helpers for vanilla <see cref="Mission"/> subclasses in a
-/// non-Unity test runtime.
-///
-/// Why not <c>new BountyMission()</c>? Vanilla's instance ctors transit
-/// through field initializers that resolve <c>InventoryItemType</c>,
-/// <c>MissionStep</c>, <c>MissionReward</c>, and (for <c>PatrolMission</c>)
-/// static <c>Faction.gold</c> etc. — several of those walk reflection
-/// paths (<c>Type.GetType("Source.Galaxy.Factions.Gold")</c> →
-/// <c>Gold()</c> → <c>HexToColor</c>) that rely on the Unity runtime
-/// being live. Running them in xUnit NREs.
-///
-/// <see cref="RuntimeHelpers.GetUninitializedObject"/> skips the instance
-/// ctor entirely, yielding a runtime-typed bare instance with all fields
-/// zeroed (null for refs, default for values). That's enough for the
-/// builder's pattern-match and field-read paths, which only inspect the
-/// concrete type, <c>storyId</c>, and a handful of public/backing fields.
-///
-/// In production, vanilla constructs Mission instances properly; our
-/// Harmony postfixes receive them as fully-populated parameters. This
-/// helper exists only so the builder tests can isolate the wiring logic
-/// from vanilla's Unity-side initialization.
+/// Construction helpers for the shape-matched fakes. The production builder
+/// reads members by name off the dispatched native object; these helpers
+/// assemble the same names the vanilla mission exposes.
 /// </summary>
 internal static class TestMission
 {
@@ -39,140 +164,60 @@ internal static class TestMission
     public static PatrolMission    Patrol(string? storyId = null)   => Build<PatrolMission>(storyId);
     public static IndustryMission  Industry(string? storyId = null) => Build<IndustryMission>(storyId);
 
-    private static T Build<T>(string? storyId) where T : Mission
+    private static T Build<T>(string? storyId) where T : Mission, new()
     {
-        var mission = (T)RuntimeHelpers.GetUninitializedObject(typeof(T));
-        if (storyId != null)
-        {
-            typeof(Mission)
-                .GetField(nameof(Mission.storyId))!
-                .SetValue(mission, storyId);
-        }
+        var mission = new T { storyId = storyId };
         return mission;
     }
 
-    /// <summary>
-    /// Populate a mission's <c>steps</c> with a single step containing the
-    /// provided objectives. Used by archetype-inference tests.
-    /// Mission.steps is a get-only auto-property (private set), so we reach
-    /// through its compiler-synthesised backing field.
-    /// </summary>
-    public static Mission WithObjectives(params MissionObjective[] objectives)
-    {
-        var mission = Generic();
-        SetBackingField(typeof(Mission), mission, "steps",
-            new List<MissionStep> { BuildStep(objectives) });
-        return mission;
-    }
+    /// <summary>Populate a mission's steps with a single step containing
+    /// the provided objectives (archetype-inference tests).</summary>
+    public static Mission WithObjectives(params MissionObjective[] objectives) =>
+        WithSteps(BuildStep(objectives));
 
-    /// <summary>Populate a mission's steps directly with a list of
-    /// pre-built steps (useful when the test wants multiple steps).</summary>
+    /// <summary>Populate a mission's steps directly with pre-built steps.</summary>
     public static Mission WithSteps(params MissionStep[] steps)
     {
         var mission = Generic();
-        SetBackingField(typeof(Mission), mission, "steps", new List<MissionStep>(steps));
+        mission.SetSteps(new List<MissionStep>(steps));
         return mission;
     }
 
     public static MissionStep BuildStep(params MissionObjective[] objectives)
     {
-        var step = (MissionStep)RuntimeHelpers.GetUninitializedObject(typeof(MissionStep));
-        SetBackingField(typeof(MissionStep), step, "objectives",
-            new List<MissionObjective>(objectives));
+        var step = new MissionStep();
+        step.SetObjectives(new List<MissionObjective>(objectives));
         return step;
     }
 
-    // --- Objective factories (vanilla instance ctors NRE outside Unity;
-    // bare instances are sufficient for pattern-match + field-read tests) ---
+    // --- objective factories ---
 
-    public static KillEnemies   Kill()    => Uninit<KillEnemies>();
-    public static ProtectUnit   Protect() => Uninit<ProtectUnit>();
-    public static TravelToPOI   Travel()  => Uninit<TravelToPOI>();
-    public static Mining        Mine()    => Uninit<Mining>();
+    public static KillEnemies   Kill()    => new();
+    public static ProtectUnit   Protect() => new();
+    public static TravelToPOI   Travel()  => new();
+    public static Mining        Mine()    => new();
 
-    public static CollectItemTypes Collect(ItemCategory? category)
-    {
-        var c = Uninit<CollectItemTypes>();
-        typeof(CollectItemTypes)
-            .GetField(nameof(CollectItemTypes.itemCategory))!
-            .SetValue(c, category);
-        return c;
-    }
+    public static CollectItemTypes Collect(ItemCategory? category) => new() { itemCategory = category };
 
-    private static T Uninit<T>() where T : MissionObjective =>
-        (T)RuntimeHelpers.GetUninitializedObject(typeof(T));
+    // --- reward factories ---
 
-    // --- Reward factories ---------------------------------------------------
-    //
-    // The MissionReward subclasses have simple public fields (amount,
-    // faction) but their ctors go through the same publicized-stub
-    // `throw null;` IL as Mission subclasses, so we reach for
-    // GetUninitializedObject. Fields are set by assigning to the bare
-    // instance since they're public.
+    public static Credits      Credits(int amount)      => new() { amount = amount };
+    public static Experience   Experience(int amount)   => new() { amount = amount };
+    public static Skillpoint   Skillpoint(int amount)   => new() { amount = amount };
+    public static Skilltree    Skilltree(string name)   => new() { treeName = name };
+    public static StoryMission StoryMissionReward(string missionId) => new() { missionId = missionId };
 
-    public static Credits Credits(int amount)
-    {
-        var r = (Credits)RuntimeHelpers.GetUninitializedObject(typeof(Credits));
-        r.amount = amount;
-        return r;
-    }
+    /// <summary>Reputation with a null faction by default (mirrors the old
+    /// stub-era constraint where the faction reference could stay unset).</summary>
+    public static Reputation Reputation(int amount, Faction? faction = null) =>
+        new() { amount = amount, faction = faction };
 
-    public static Experience Experience(int amount)
-    {
-        var r = (Experience)RuntimeHelpers.GetUninitializedObject(typeof(Experience));
-        r.amount = amount;
-        return r;
-    }
+    public static ItemReward ItemReward(InventoryItemType itemType) => new() { item = itemType };
 
-    public static Source.MissionSystem.Rewards.Skillpoint Skillpoint(int amount)
-    {
-        var r = (Source.MissionSystem.Rewards.Skillpoint)RuntimeHelpers.GetUninitializedObject(
-            typeof(Source.MissionSystem.Rewards.Skillpoint));
-        r.amount = amount;
-        return r;
-    }
-
-    public static Source.MissionSystem.Rewards.Skilltree Skilltree(string name)
-    {
-        var r = (Source.MissionSystem.Rewards.Skilltree)RuntimeHelpers.GetUninitializedObject(
-            typeof(Source.MissionSystem.Rewards.Skilltree));
-        r.treeName = name;
-        return r;
-    }
-
-    public static Source.MissionSystem.Rewards.StoryMission StoryMissionReward(string missionId)
-    {
-        var r = (Source.MissionSystem.Rewards.StoryMission)RuntimeHelpers.GetUninitializedObject(
-            typeof(Source.MissionSystem.Rewards.StoryMission));
-        r.missionId = missionId;
-        return r;
-    }
-
-    /// <summary>
-    /// Build a Reputation reward with a null faction — we can't construct
-    /// a real Faction in xUnit because <c>Faction</c>'s static constructor
-    /// self-references <c>Source.Galaxy.Factions.Gold/Red/Blue/…</c>,
-    /// whose ctors NRE in the publicized-stub / no-Unity-runtime
-    /// environment. Builder tests assert the "unknown" fallback when
-    /// <c>rep.faction</c> is null; full rep-extraction coverage lives in
-    /// ML-T7b's in-game manual E2E.
-    /// </summary>
-    public static Source.MissionSystem.Rewards.Reputation Reputation(int amount)
-    {
-        var rep = (Source.MissionSystem.Rewards.Reputation)RuntimeHelpers.GetUninitializedObject(
-            typeof(Source.MissionSystem.Rewards.Reputation));
-        rep.amount = amount;
-        // rep.faction stays null; see doc comment above.
-        return rep;
-    }
-
-    /// <summary>Populate a mission's <c>rewards</c> with a list of the
-    /// given MissionReward instances. Same backing-field pattern as
-    /// WithObjectives / WithSteps.</summary>
+    /// <summary>Populate a mission's rewards with the given instances.</summary>
     public static Mission WithRewards(this Mission mission, params MissionReward[] rewards)
     {
-        SetBackingField(typeof(Mission), mission, "rewards",
-            new List<MissionReward>(rewards));
+        mission.SetRewards(new List<MissionReward>(rewards));
         return mission;
     }
 
@@ -180,12 +225,15 @@ internal static class TestMission
     public static Mission GenericWithRewards(params MissionReward[] rewards) =>
         Generic().WithRewards(rewards);
 
-    private static void SetBackingField(System.Type declaringType, object instance, string propertyName, object? value)
+    public static MapPointOfInterest Poi(string? guid = null, string? name = null, MapElement? system = null)
     {
-        // C# auto-property backing fields are named `<PropertyName>k__BackingField`.
-        var field = declaringType.GetField(
-            $"<{propertyName}>k__BackingField",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        field!.SetValue(instance, value);
+        var poi = new MapPointOfInterest { guid = guid, system = system };
+        poi.SetPrivateName(name);
+        return poi;
     }
+
+    public static Faction Faction(string? identifier) => new() { identifier = identifier };
+
+    public static InventoryItemType ItemType(string? identifier = null, string? unityName = null) =>
+        new() { identifier = identifier, name = unityName };
 }

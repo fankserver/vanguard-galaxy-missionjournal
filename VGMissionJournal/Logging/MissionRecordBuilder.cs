@@ -1,80 +1,39 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using Behaviour.Item;
-using Source.Galaxy;
-using Source.MissionSystem;
-using Source.MissionSystem.Rewards;
-using Source.Player;
 
 namespace VGMissionJournal.Logging;
 
 /// <summary>
-/// Snapshots a vanilla <see cref="Mission"/> into a <see cref="MissionRecord"/>
-/// and appends timeline entries as the mission progresses through its lifecycle.
+/// Snapshots a vanilla mission (delivered through the API's explicitly
+/// version-sensitive native view as a plain <see cref="object"/>) into a
+/// <see cref="MissionRecord"/> and appends timeline entries as witnessed
+/// transitions arrive from <c>IMissionService.Transitioned</c>.
 ///
-/// <para>The builder is called from Phase-4 lifecycle patches —
-/// <see cref="Patches.MissionAcceptPatch"/>,
-/// <see cref="Patches.MissionCompletePatch"/>,
-/// <see cref="Patches.MissionFailPatch"/>,
-/// <see cref="Patches.MissionAbandonPatch"/>,
-/// <see cref="Patches.MissionArchivePatch"/>
-/// — so each patch body stays ~5 lines of glue.</para>
+/// <para>The journal is a pure observer: transitions come from the API —
+/// there are no Harmony patches. Native objects are inspected only during
+/// the exact dispatch callback and immediately copied; they are never
+/// retained or mutated.</para>
+///
+/// <para><b>No compile-time game reference.</b> Every member read goes
+/// through <see cref="VanillaReflection"/> (field-first, then
+/// compiler-synthesised backing fields, then public properties), so the
+/// production assembly carries no Assembly-CSharp reference. Expected
+/// vanilla shape: <c>storyId</c>, <c>name</c>, <c>sourcePoi</c> (with
+/// <c>system</c>), <c>sourceFaction</c> (with <c>identifier</c>),
+/// <c>steps</c> (each with <c>description</c>, <c>requireAllObjectives</c>,
+/// <c>hidden</c>, <c>objectives</c>) and <c>rewards</c>. Inaccessible or
+/// missing members degrade to null/empty rather than faulting the record.</para>
 ///
 /// <para>Inputs are injected so the builder is deterministic in tests:
-/// <see cref="IClock"/> for timestamps,
-/// <see cref="Func{String}"/> for the player's current system id.</para>
-///
-/// <para><b>Publicized-stub access pattern:</b> vanilla public fields
-/// work via direct access in both the test stub and the live runtime.
-/// Auto-property getters (<c>Mission.rewards</c>, <c>MapElement.guid</c>,
-/// <c>Faction.identifier</c>, <c>Faction.name</c>) are replaced by
-/// <c>throw null;</c> IL in the publicized stub, so we reflect-read the
-/// compiler-synthesised backing fields. Reflection cost is trivial;
-/// each mission lifecycle transition emits at most one event.</para>
+/// <see cref="IClock"/> for timestamps and <see cref="Func{String}"/> for
+/// the player's current system id.</para>
 /// </summary>
 internal sealed class MissionRecordBuilder
 {
     private readonly IClock _clock;
     private readonly Func<string?> _playerCurrentSystemIdProvider;
-
-    // Session-local correlation id per Mission instance. ConditionalWeakTable
-    // holds the key weakly, so garbage-collected missions don't keep ids
-    // alive. The table lives for the plugin's lifetime (process uptime), but
-    // mission identity is lost across save/load because vanilla rebuilds
-    // Mission objects on load.
-    private static readonly ConditionalWeakTable<Mission, string> _instanceIds =
-        new();
-
-    // --- cached reflection (FieldInfos are immutable and thread-safe once resolved) ---
-    private static readonly FieldInfo _missionRewardsField =
-        typeof(Mission).GetField("<rewards>k__BackingField", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("Mission.<rewards>k__BackingField not found — vanilla layout changed?");
-
-    private static readonly FieldInfo _missionStepsField =
-        typeof(Mission).GetField("<steps>k__BackingField", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("Mission.<steps>k__BackingField not found — vanilla layout changed?");
-
-    private static readonly FieldInfo _stepObjectivesField =
-        typeof(MissionStep).GetField("<objectives>k__BackingField", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("MissionStep.<objectives>k__BackingField not found — vanilla layout changed?");
-
-    private static readonly FieldInfo _itemTypeIdentifierField =
-        typeof(InventoryItemType).GetField("<identifier>k__BackingField", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("InventoryItemType.<identifier>k__BackingField not found — vanilla layout changed?");
-
-    private static readonly FieldInfo _mapElementGuidField =
-        typeof(MapElement).GetField("<guid>k__BackingField", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("MapElement.<guid>k__BackingField not found — vanilla layout changed?");
-
-    private static readonly FieldInfo _mapElementNameField =
-        typeof(MapElement).GetField("_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("MapElement._name not found — vanilla layout changed?");
-
-    private static readonly FieldInfo _factionIdentifierField =
-        typeof(Faction).GetField("<identifier>k__BackingField", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-        ?? throw new InvalidOperationException("Faction.<identifier>k__BackingField not found — vanilla layout changed?");
 
     public MissionRecordBuilder(IClock clock, Func<string?> playerCurrentSystemIdProvider)
     {
@@ -82,21 +41,19 @@ internal sealed class MissionRecordBuilder
         _playerCurrentSystemIdProvider = playerCurrentSystemIdProvider ?? throw new ArgumentNullException(nameof(playerCurrentSystemIdProvider));
     }
 
-    /// <summary>Session-local GUID per Mission instance. Uses a
-    /// ConditionalWeakTable keyed by the Mission reference, so two
-    /// lookups for the same Mission return the same id.</summary>
-    public string GetInstanceId(Mission mission) =>
-        _instanceIds.GetValue(mission, _ => Guid.NewGuid().ToString());
-
     /// <summary>Snapshot identity + structure (steps) + rewards of an
-    /// accepted mission. Returns a MissionRecord with a single timeline
-    /// entry: Accepted, stamped with the current clock.</summary>
-    public MissionRecord CreateFromAccept(Mission mission)
+    /// accepted mission. <paramref name="mission"/> is the version-sensitive
+    /// native object resolved for the exact accepted snapshot;
+    /// <paramref name="instanceId"/> is the API occurrence identity.
+    /// Returns a MissionRecord with a single timeline entry: Accepted,
+    /// stamped with the current clock.</summary>
+    public MissionRecord CreateFromAccept(object mission, string instanceId)
     {
         if (mission is null) throw new ArgumentNullException(nameof(mission));
+        if (string.IsNullOrEmpty(instanceId)) throw new ArgumentException("An API occurrence identity is required.", nameof(instanceId));
 
-        var sourcePoi    = mission.sourcePoi;       // public field — works in both envs
-        var sourceSystem = sourcePoi?.system;        // public field on MapElement
+        VanillaReflection.TryGet(mission, "sourcePoi", out var sourcePoi);
+        VanillaReflection.TryGet(sourcePoi!, "system", out var sourceSystem);
 
         var timeline = new List<TimelineEntry>
         {
@@ -104,9 +61,9 @@ internal sealed class MissionRecordBuilder
         };
 
         return new MissionRecord(
-            StoryId:                 mission.storyId ?? string.Empty,
-            MissionInstanceId:       GetInstanceId(mission),
-            MissionName:             mission.name,
+            StoryId:                 VanillaReflection.GetString(mission, "storyId") ?? string.Empty,
+            MissionInstanceId:       instanceId,
+            MissionName:             VanillaReflection.GetString(mission, "name"),
             MissionSubclass:         mission.GetType().Name,
             MissionLevel:            0,
             SourceStationId:         ReadGuid(sourcePoi),
@@ -115,7 +72,7 @@ internal sealed class MissionRecordBuilder
             SourceSystemName:        ReadName(sourceSystem),
             SourceSectorId:          null,
             SourceSectorName:        null,
-            SourceFaction:           ReadFactionId(mission.sourceFaction),
+            SourceFaction:           ReadFactionId(ReadMember(mission, "sourceFaction")),
             TargetStationId:         null,
             TargetStationName:       null,
             TargetSystemId:          null,
@@ -129,22 +86,20 @@ internal sealed class MissionRecordBuilder
     }
 
     /// <summary>Append a new timeline entry to an existing record. For
-    /// terminal states (Completed/Failed/Abandoned), re-extract rewards
-    /// off the live Mission (null means skip reward re-extract, used by
-    /// Archive backstop). Returns a new record (records are immutable).</summary>
+    /// Completed with a live native mission, re-extract rewards (vanilla
+    /// populates <c>rewards</c> during ClaimRewards; the dispatched object
+    /// may already reflect the final set). A null mission means skip reward
+    /// re-extract. Returns a new record (records are immutable).</summary>
     public MissionRecord AppendTransition(
         MissionRecord existing,
         TimelineState state,
-        Mission? mission)
+        object? mission)
     {
         if (existing is null) throw new ArgumentNullException(nameof(existing));
 
         var newEntry = new TimelineEntry(state, _clock.GameSeconds, _clock.UtcNow.ToString("o"));
         var newTimeline = new List<TimelineEntry>(existing.Timeline) { newEntry };
 
-        // Re-read rewards on Completed with a live mission (vanilla populates
-        // mission.rewards during ClaimRewards; our postfix may see the final set).
-        // Failed/Abandoned don't pay rewards; null mission means we can't re-read.
         var newRewards = (state == TimelineState.Completed && mission is not null)
             ? ExtractRewards(mission)
             : existing.Rewards;
@@ -154,15 +109,12 @@ internal sealed class MissionRecordBuilder
 
     // --- reward extraction ---
 
-    private static IReadOnlyList<MissionRewardSnapshot> ExtractRewards(Mission mission)
+    private static IReadOnlyList<MissionRewardSnapshot> ExtractRewards(object mission)
     {
         try
         {
-            var rewards = _missionRewardsField.GetValue(mission) as List<MissionReward>;
-            if (rewards is null || rewards.Count == 0) return Array.Empty<MissionRewardSnapshot>();
-
-            var all = new List<MissionRewardSnapshot>(rewards.Count);
-            foreach (var reward in rewards)
+            var all = new List<MissionRewardSnapshot>();
+            foreach (var reward in EnumerateMembers(mission, "rewards"))
             {
                 if (reward is null) continue;
                 all.Add(SnapshotReward(reward));
@@ -175,24 +127,22 @@ internal sealed class MissionRecordBuilder
         }
     }
 
-    private static MissionRewardSnapshot SnapshotReward(MissionReward reward) =>
+    private static MissionRewardSnapshot SnapshotReward(object reward) =>
         new(Type:   reward.GetType().Name,
             Fields: ReadPrimitiveFields(reward));
 
     // --- step / objective extraction ---
 
-    /// <summary>Snapshot <c>mission.steps</c>. Returns an empty list if the steps
-    /// list is inaccessible (reflection-read error) or missing. Consumer-facing
+    /// <summary>Snapshot the mission's <c>steps</c>. Returns an empty list if
+    /// the steps member is inaccessible or missing. Consumer-facing
     /// semantics: empty = "vanilla has no steps or we couldn't read them",
     /// non-empty = "here's what we saw".</summary>
-    private static IReadOnlyList<MissionStepDefinition> ExtractSteps(Mission mission)
+    private static IReadOnlyList<MissionStepDefinition> ExtractSteps(object mission)
     {
         try
         {
-            var steps = _missionStepsField.GetValue(mission) as List<MissionStep>;
-            if (steps is null) return Array.Empty<MissionStepDefinition>();
-            var result = new List<MissionStepDefinition>(steps.Count);
-            foreach (var step in steps)
+            var result = new List<MissionStepDefinition>();
+            foreach (var step in EnumerateMembers(mission, "steps"))
             {
                 if (step is null) continue;
                 result.Add(SnapshotStep(step));
@@ -205,38 +155,42 @@ internal sealed class MissionRecordBuilder
         }
     }
 
-    private static MissionStepDefinition SnapshotStep(MissionStep step)
+    private static MissionStepDefinition SnapshotStep(object step)
     {
-        var objectives = _stepObjectivesField.GetValue(step) as List<MissionObjective>;
-        var defs = new List<MissionObjectiveDefinition>(objectives?.Count ?? 0);
-        if (objectives != null)
+        var defs = new List<MissionObjectiveDefinition>();
+        foreach (var objective in EnumerateMembers(step, "objectives"))
         {
-            foreach (var objective in objectives)
-            {
-                if (objective is null) continue;
-                defs.Add(SnapshotObjective(objective));
-            }
+            if (objective is null) continue;
+            defs.Add(SnapshotObjective(objective));
         }
 
         return new MissionStepDefinition(
-            Description:          step.description,
-            RequireAllObjectives: step.requireAllObjectives,
-            Hidden:               step.hidden,
+            Description:          VanillaReflection.GetString(step, "description"),
+            RequireAllObjectives: VanillaReflection.GetValue<bool>(step, "requireAllObjectives") ?? false,
+            Hidden:               VanillaReflection.GetValue<bool>(step, "hidden") ?? false,
             Objectives:           defs);
     }
 
-    private static MissionObjectiveDefinition SnapshotObjective(MissionObjective objective) =>
+    private static MissionObjectiveDefinition SnapshotObjective(object objective) =>
         new(Type:   objective.GetType().Name,
             Fields: ReadPrimitiveFields(objective));
 
+    private static IEnumerable<object?> EnumerateMembers(object target, string name)
+    {
+        if (!VanillaReflection.TryGet(target, name, out var value) || value is not IEnumerable sequence || value is string)
+            return Array.Empty<object?>();
+        var list = new List<object?>();
+        foreach (var item in sequence) list.Add(item);
+        return list;
+    }
+
     /// <summary>Reflect across a target's public fields + instance
     /// properties and emit any that are primitive-ish. Enums go through
-    /// ToString(). <see cref="Faction"/> / <see cref="InventoryItemType"/>
-    /// / <see cref="MapElement"/> references are resolved to their stable
-    /// identifier (guid / id / name) via the cached backing-field
-    /// readers. Anything else is skipped. Used for both objectives and
-    /// rewards — both are open sets of vanilla subclasses with small
-    /// amounts of primitive state worth surfacing.</summary>
+    /// ToString(). Faction / InventoryItemType / MapElement references are
+    /// resolved to their stable identifier (guid / id / name) via the
+    /// name-matched readers. Anything else is skipped. Used for both
+    /// objectives and rewards — both are open sets of vanilla subclasses
+    /// with small amounts of primitive state worth surfacing.</summary>
     private static IReadOnlyDictionary<string, object?>? ReadPrimitiveFields(object target)
     {
         try
@@ -296,18 +250,25 @@ internal sealed class MissionRecordBuilder
             case Enum e:
                 dict[camel] = e.ToString();
                 return;
-            case Faction f:
-                var fid = ReadFactionId(f);
-                if (fid != null) dict[camel] = fid;
-                return;
-            case InventoryItemType it:
-                var iid = ResolveItemIdentifier(it);
-                if (iid != null) dict[camel] = iid;
-                return;
-            case MapElement me:
-                var gid = ReadGuid(me);
-                if (gid != null) dict[camel] = gid;
-                return;
+        }
+
+        if (VanillaReflection.HasBaseNamed(value, "Faction"))
+        {
+            var fid = ReadFactionId(value);
+            if (fid != null) dict[camel] = fid;
+            return;
+        }
+        if (VanillaReflection.HasBaseNamed(value, "InventoryItemType"))
+        {
+            var iid = ResolveItemIdentifier(value);
+            if (iid != null) dict[camel] = iid;
+            return;
+        }
+        if (VanillaReflection.HasBaseNamed(value, "MapElement"))
+        {
+            var gid = ReadGuid(value);
+            if (gid != null) dict[camel] = gid;
+            return;
         }
     }
 
@@ -319,52 +280,47 @@ internal sealed class MissionRecordBuilder
 
     // --- reflection-backed field readers (null-safe) ---
 
-    private static string? ReadGuid(MapElement? element) =>
-        element is null ? null : _mapElementGuidField.GetValue(element) as string;
+    private static object? ReadMember(object target, string name) =>
+        VanillaReflection.TryGet(target, name, out var value) ? value : null;
 
-    private static string? ReadName(MapElement? element) =>
-        element is null ? null : _mapElementNameField.GetValue(element) as string;
+    private static string? ReadGuid(object? element) =>
+        element is null ? null : VanillaReflection.GetString(element, "guid");
 
-    private static string? ReadFactionId(Faction? faction) =>
-        faction is null ? null : _factionIdentifierField.GetValue(faction) as string;
+    private static string? ReadName(object? element) =>
+        element is null ? null : VanillaReflection.GetString(element, "_name") ?? VanillaReflection.GetString(element, "name");
+
+    private static string? ReadFactionId(object? faction) =>
+        faction is null ? null : VanillaReflection.GetString(faction, "identifier");
 
     /// <summary>
-    /// Resolve an <see cref="InventoryItemType"/> to its stable registry
-    /// identifier — the string <see cref="InventoryItemType.Get"/> accepts.
-    /// Vanilla's load code sets <c>identifier = name</c> once on the prefab
-    /// (<c>InventoryItemType.cs:717</c>), and <c>identifier</c> is an
-    /// auto-property backing field without <c>[SerializeField]</c>, so
-    /// <see cref="UnityEngine.Object.Instantiate(UnityEngine.Object)"/> does
-    /// NOT carry the value to runtime clones (<c>Item</c>-reward instances
-    /// produced by <c>ItemBuilder.CreateItemType</c>). For those clones the
-    /// stable id lives on the Unity object's <c>name</c> — with the
-    /// <c>(Clone)</c> suffix that <c>Instantiate</c> appends stripped.
-    /// Translated <c>displayName</c> is intentionally NOT used; the log
-    /// stores system identifiers so consumers can round-trip via <c>Get</c>.
+    /// Resolve an item-type reference to its stable registry identifier —
+    /// the string vanilla's item registry accepts. Vanilla sets
+    /// <c>identifier = name</c> once on the prefab, but <c>identifier</c>
+    /// is an auto-property backing field without <c>[SerializeField]</c>,
+    /// so Unity <c>Instantiate</c> clones can lose it; for those the stable
+    /// id lives on the Unity object's <c>name</c> — with the <c>(Clone)</c>
+    /// suffix stripped. Translated <c>displayName</c> is intentionally NOT
+    /// used; the log stores system identifiers so consumers can round-trip
+    /// via the registry lookup.
     /// </summary>
-    private static string? ResolveItemIdentifier(InventoryItemType it)
+    private static string? ResolveItemIdentifier(object itemType)
     {
-        if (it == null) return null;
-
-        var backing = SafeGet(() => _itemTypeIdentifierField.GetValue(it)) as string;
+        var backing = VanillaReflection.GetString(itemType, "identifier");
         if (!string.IsNullOrEmpty(backing)) return backing;
 
-        var name = SafeGet(() => it.name) as string;
+        var name = VanillaReflection.GetString(itemType, "name");
         return StripCloneSuffix(name);
     }
 
     /// <summary>Strip Unity's "(Clone)" suffix (sometimes stacked for nested
     /// Instantiate calls, sometimes with a leading space) to recover the
     /// stable registry key. Internal + visible-to-tests for direct
-    /// coverage of the string-manipulation path, since the surrounding
-    /// <see cref="ResolveItemIdentifier"/> needs a real
-    /// <see cref="UnityEngine.Object"/> instance that isn't
-    /// constructible in the xUnit runtime.</summary>
+    /// coverage of the string-manipulation path.</summary>
     internal static string? StripCloneSuffix(string? name)
     {
         if (string.IsNullOrEmpty(name)) return null;
         const string cloneSuffix = "(Clone)";
-        while (name!.EndsWith(cloneSuffix, System.StringComparison.Ordinal))
+        while (name!.EndsWith(cloneSuffix, StringComparison.Ordinal))
         {
             name = name.Substring(0, name.Length - cloneSuffix.Length).TrimEnd();
         }

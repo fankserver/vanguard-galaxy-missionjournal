@@ -21,7 +21,7 @@ public class MissionRecordBuilderTests
         var builder = new MissionRecordBuilder(clock, () => null);
         var mission = TestMission.Generic("m1");
 
-        var r = builder.CreateFromAccept(mission);
+        var r = builder.CreateFromAccept(mission, "inst-1");
 
         Assert.Single(r.Timeline);
         Assert.Equal(TimelineState.Accepted, r.Timeline[0].State);
@@ -38,7 +38,7 @@ public class MissionRecordBuilderTests
         var builder = new MissionRecordBuilder(clock, () => null);
         var mission = TestMission.Generic("m1");
 
-        var accepted = builder.CreateFromAccept(mission);
+        var accepted = builder.CreateFromAccept(mission, "inst-1");
 
         clock.GameSeconds = 420.0;
         var completed = builder.AppendTransition(accepted, TimelineState.Completed, mission);
@@ -49,47 +49,26 @@ public class MissionRecordBuilderTests
         Assert.Equal(Outcome.Completed,       completed.Outcome);
     }
 
-    // --- GetInstanceId: stable per Mission instance -----------------------
+    // --- Identity comes from the API occurrence, not the builder ----------
 
     [Fact]
-    public void GetInstanceId_ReturnsStableIdForSameMission()
+    public void CreateFromAccept_UsesTheProvidedApiOccurrenceId()
     {
-        var clock   = new FakeClock();
-        var builder = new MissionRecordBuilder(clock, () => null);
-        var mission = TestMission.Generic("m1");
-
-        var id1 = builder.GetInstanceId(mission);
-        var id2 = builder.GetInstanceId(mission);
-
-        Assert.Equal(id1, id2);
-        Assert.NotEmpty(id1);
-    }
-
-    // --- Mission instance id ----------------------------------------------
-
-    [Fact]
-    public void CreateFromAccept_SameMissionInstance_YieldsStableInstanceId()
-    {
+        var b = NewBuilder();
         var mission = TestMission.Generic();
-        var b = NewBuilder();
 
-        var r1 = b.CreateFromAccept(mission);
-        var r2 = b.CreateFromAccept(mission);
+        var r1 = b.CreateFromAccept(mission, "occ-1");
+        var r2 = b.CreateFromAccept(mission, "occ-2");
 
-        Assert.False(string.IsNullOrEmpty(r1.MissionInstanceId));
-        Assert.Equal(r1.MissionInstanceId, r2.MissionInstanceId);
+        Assert.Equal("occ-1", r1.MissionInstanceId);
+        Assert.Equal("occ-2", r2.MissionInstanceId);
     }
 
-    [Fact]
-    public void CreateFromAccept_DifferentMissionInstances_YieldDistinctInstanceIds()
-    {
-        var b = NewBuilder();
-
-        var r1 = b.CreateFromAccept(TestMission.Generic());
-        var r2 = b.CreateFromAccept(TestMission.Generic());
-
-        Assert.NotEqual(r1.MissionInstanceId, r2.MissionInstanceId);
-    }
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void CreateFromAccept_RejectsMissingOccurrenceId(string? instanceId)
+        => Assert.Throws<System.ArgumentException>(() => NewBuilder().CreateFromAccept(TestMission.Generic(), instanceId!));
 
     // --- Core fields ------------------------------------------------------
 
@@ -99,7 +78,7 @@ public class MissionRecordBuilderTests
         var mission = TestMission.Bounty();
         mission.name = "Pirate Hunt";
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         Assert.Equal("BountyMission", r.MissionSubclass);
         Assert.Equal("Pirate Hunt",   r.MissionName);
@@ -112,10 +91,35 @@ public class MissionRecordBuilderTests
         _clock.GameSeconds = 999.0;
         _clock.UtcNow      = new System.DateTime(2026, 4, 23, 20, 30, 0, System.DateTimeKind.Utc);
 
-        var r = NewBuilder().CreateFromAccept(TestMission.Generic());
+        var r = NewBuilder().CreateFromAccept(TestMission.Generic(), "inst-1");
 
         Assert.Equal(999.0, r.Timeline[0].GameSeconds);
         Assert.StartsWith("2026-04-23T20:30:00", r.Timeline[0].RealUtc);
+    }
+
+    // --- Source placement ---------------------------------------------------
+
+    [Fact]
+    public void CreateFromAccept_ReadsSourceStationSystemAndFaction()
+    {
+        var mission = TestMission.Generic();
+        var system  = TestMission.Poi(guid: "sys-zoran", name: "Zoran");
+        var station = TestMission.Poi(guid: "sta-1", name: "Port Zoran", system: system);
+        mission.sourcePoi = station;
+        mission.sourceFaction = TestMission.Faction("BountyGuild");
+
+        var builderWithSystem = new MissionRecordBuilder(_clock, () => "sys-here");
+        var r = builderWithSystem.CreateFromAccept(mission, "inst-1");
+
+        // guid reads resolve through the auto-property backing field; the
+        // display name through the private _name field; the system link is
+        // followed reflectively.
+        Assert.Equal("sta-1",       r.SourceStationId);
+        Assert.Equal("Port Zoran",  r.SourceStationName);
+        Assert.Equal("sys-zoran",   r.SourceSystemId);
+        Assert.Equal("Zoran",       r.SourceSystemName);
+        Assert.Equal("BountyGuild", r.SourceFaction);
+        Assert.Equal("sys-here",    r.PlayerCurrentSystemId);
     }
 
     // --- StoryId ----------------------------------------------------------
@@ -125,7 +129,7 @@ public class MissionRecordBuilderTests
     {
         var mission = TestMission.Generic("story-xyz");
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         Assert.Equal("story-xyz", r.StoryId);
     }
@@ -133,7 +137,7 @@ public class MissionRecordBuilderTests
     [Fact]
     public void CreateFromAccept_StoryIdAbsent_YieldsEmptyString()
     {
-        var r = NewBuilder().CreateFromAccept(TestMission.Generic());
+        var r = NewBuilder().CreateFromAccept(TestMission.Generic(), "inst-1");
 
         Assert.Equal(string.Empty, r.StoryId);
     }
@@ -143,9 +147,9 @@ public class MissionRecordBuilderTests
     [Fact]
     public void CreateFromAccept_NoSteps_YieldsEmptyStepsList()
     {
-        // A bare Mission from GetUninitializedObject has steps=null.
-        // v3 normalizes null → empty (Steps is non-nullable on MissionRecord).
-        var r = NewBuilder().CreateFromAccept(TestMission.Generic());
+        // steps is null on a fresh mission. v3 normalizes null → empty
+        // (Steps is non-nullable on MissionRecord).
+        var r = NewBuilder().CreateFromAccept(TestMission.Generic(), "inst-1");
 
         Assert.Empty(r.Steps);
     }
@@ -157,9 +161,10 @@ public class MissionRecordBuilderTests
         var kill = TestMission.Kill();
         kill.requiredAmount = 5;
         kill.shipType = "Pirate";
+        kill.statusText = "should be dropped";
         var mission = TestMission.WithObjectives(kill);
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         Assert.NotEmpty(r.Steps);
         var steps = r.Steps.ToList();
@@ -172,6 +177,23 @@ public class MissionRecordBuilderTests
         Assert.NotNull(obj.Fields);
         Assert.Equal(5,        obj.Fields!["requiredAmount"]);
         Assert.Equal("Pirate", obj.Fields!["shipType"]);
+        Assert.False(obj.Fields!.ContainsKey("statusText"));
+        Assert.False(obj.Fields!.ContainsKey("coreName"));
+        Assert.False(obj.Fields!.ContainsKey("currentAmount"));
+    }
+
+    [Fact]
+    public void CreateFromAccept_ObjectiveReference_ResolvesStableIdentifier()
+    {
+        var travel = TestMission.Travel();
+        travel.poi = TestMission.Poi(guid: "sys-target");
+        var mission = TestMission.WithObjectives(travel);
+
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
+
+        var obj = Assert.Single(r.Steps[0].Objectives);
+        Assert.Equal("TravelToPOI", obj.Type);
+        Assert.Equal("sys-target", obj.Fields!["poi"]);
     }
 
     [Fact]
@@ -181,7 +203,7 @@ public class MissionRecordBuilderTests
         var s2 = TestMission.BuildStep(TestMission.Kill());
         var mission = TestMission.WithSteps(s1, s2);
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         Assert.NotEmpty(r.Steps);
         var steps = r.Steps.ToList();
@@ -199,7 +221,7 @@ public class MissionRecordBuilderTests
             TestMission.Credits(1500),
             TestMission.Experience(200));
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         // v3 captures the planned reward set at accept time
         Assert.NotEmpty(r.Rewards);
@@ -214,7 +236,7 @@ public class MissionRecordBuilderTests
     {
         var mission = TestMission.GenericWithRewards(); // zero rewards
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         Assert.Empty(r.Rewards);
     }
@@ -231,7 +253,7 @@ public class MissionRecordBuilderTests
             TestMission.Skilltree("Mining"),
             TestMission.StoryMissionReward("tutorial_done"));
 
-        var r = NewBuilder().CreateFromAccept(mission);
+        var r = NewBuilder().CreateFromAccept(mission, "inst-1");
 
         Assert.NotNull(r.Rewards);
         var rewards = r.Rewards.ToList();
@@ -249,6 +271,44 @@ public class MissionRecordBuilderTests
                                     && (string)rw.Fields!["missionId"]! == "tutorial_done");
     }
 
+    [Fact]
+    public void CreateFromAccept_ItemReward_PrefersRegistryIdentifier()
+    {
+        var mission = TestMission.GenericWithRewards(
+            TestMission.ItemReward(TestMission.ItemType(identifier: "Body Armor", unityName: "Body Armor(Clone)")));
+
+        var reward = Assert.Single(NewBuilder().CreateFromAccept(mission, "inst-1").Rewards);
+
+        Assert.Equal("ItemReward", reward.Type);
+        Assert.Equal("Body Armor", reward.Fields!["item"]);
+    }
+
+    [Fact]
+    public void CreateFromAccept_ItemRewardClone_FallsBackToStrippedUnityName()
+    {
+        // Instantiate clones lose the non-serialized identifier; the stable
+        // key survives on the Unity object name.
+        var mission = TestMission.GenericWithRewards(
+            TestMission.ItemReward(TestMission.ItemType(identifier: null, unityName: "SalvageMissionItem2(Clone)")));
+
+        var reward = Assert.Single(NewBuilder().CreateFromAccept(mission, "inst-1").Rewards);
+
+        Assert.Equal("SalvageMissionItem2", reward.Fields!["item"]);
+    }
+
+    [Fact]
+    public void CreateFromAccept_ReputationReward_ResolvesFactionIdentifier()
+    {
+        var mission = TestMission.GenericWithRewards(
+            TestMission.Reputation(25, TestMission.Faction("MerchantGuild")));
+
+        var reward = Assert.Single(NewBuilder().CreateFromAccept(mission, "inst-1").Rewards);
+
+        Assert.Equal("Reputation", reward.Type);
+        Assert.Equal(25,               reward.Fields!["amount"]);
+        Assert.Equal("MerchantGuild",  reward.Fields!["faction"]);
+    }
+
     // --- AppendTransition: timeline deep-copy -----------------------------
 
     [Fact]
@@ -256,7 +316,7 @@ public class MissionRecordBuilderTests
     {
         var builder  = NewBuilder();
         var mission  = TestMission.Generic();
-        var accepted = builder.CreateFromAccept(mission);
+        var accepted = builder.CreateFromAccept(mission, "inst-1");
 
         var completed = builder.AppendTransition(accepted, TimelineState.Completed, mission);
 
@@ -270,7 +330,7 @@ public class MissionRecordBuilderTests
     {
         var builder  = NewBuilder();
         var mission  = TestMission.Generic();
-        var accepted = builder.CreateFromAccept(mission);
+        var accepted = builder.CreateFromAccept(mission, "inst-1");
 
         var failed = builder.AppendTransition(accepted, TimelineState.Failed, null);
 
@@ -282,7 +342,7 @@ public class MissionRecordBuilderTests
     {
         var builder  = NewBuilder();
         var mission  = TestMission.Generic();
-        var accepted = builder.CreateFromAccept(mission);
+        var accepted = builder.CreateFromAccept(mission, "inst-1");
 
         var abandoned = builder.AppendTransition(accepted, TimelineState.Abandoned, null);
 
@@ -292,10 +352,10 @@ public class MissionRecordBuilderTests
     [Fact]
     public void AppendTransition_NullMission_DoesNotReextractRewards()
     {
-        // Archive backstop: null mission means keep existing rewards unchanged.
+        // Neutral/absent native view: null mission means keep existing rewards unchanged.
         var mission = TestMission.GenericWithRewards(TestMission.Credits(500));
         var builder = NewBuilder();
-        var accepted = builder.CreateFromAccept(mission);
+        var accepted = builder.CreateFromAccept(mission, "inst-1");
 
         var completed = builder.AppendTransition(accepted, TimelineState.Completed, null);
 
@@ -314,7 +374,7 @@ public class MissionRecordBuilderTests
 
         // Accept with no rewards populated on the mission.
         var mission = TestMission.Generic("m1");
-        var accepted = builder.CreateFromAccept(mission);
+        var accepted = builder.CreateFromAccept(mission, "inst-1");
         Assert.Empty(accepted.Rewards);
 
         // Simulate vanilla finalizing rewards during ClaimRewards by populating
@@ -350,9 +410,9 @@ public class MissionRecordBuilderTests
     // --- Null-safety in test runtime -------------------------------------
 
     [Fact]
-    public void CreateFromAccept_NullGamePlayer_PlayerFieldsFallBackToNullOrZero()
+    public void CreateFromAccept_UnprovidedPlayerContext_FallsBackToNullOrZero()
     {
-        var r = NewBuilder().CreateFromAccept(TestMission.Generic());
+        var r = NewBuilder().CreateFromAccept(TestMission.Generic(), "inst-1");
 
         Assert.Equal(0, r.PlayerLevel);
         Assert.Null(r.PlayerShipName);
@@ -364,6 +424,6 @@ public class MissionRecordBuilderTests
     public void CreateFromAccept_NullMission_Throws()
     {
         Assert.Throws<System.ArgumentNullException>(() =>
-            NewBuilder().CreateFromAccept(null!));
+            NewBuilder().CreateFromAccept(null!, "inst-1"));
     }
 }

@@ -7,30 +7,37 @@ using VGMissionJournal.Logging;
 
 namespace VGMissionJournal.Persistence;
 
+/// <summary>Legacy file-based persistence: writes journal sidecars beside
+/// vanilla saves on witnessed save successes and restores them on session
+/// readiness. Used only when [Persistence] UseApiSaveData is disabled; the
+/// API-managed path lives in <see cref="CoordinatedPersistence"/>.</summary>
 internal sealed class LifecyclePersistence : IJournalPersistence
 {
-    private readonly ILifecycleApi _api;
+    private readonly ILifecycleService _api;
     private readonly MissionStore _store;
     private readonly JournalIO _io;
     private readonly Action<string> _warn;
-    private readonly IDisposable _subscription;
     private readonly HashSet<string> _swept = new(StringComparer.OrdinalIgnoreCase);
     private Guid? _ready;
     private bool _disposed;
 
-    internal LifecyclePersistence(ILifecycleApi api, MissionStore store, JournalIO io, Action<string> warn)
+    internal LifecyclePersistence(ILifecycleService api, MissionStore store, JournalIO io, Action<string> warn)
     {
         _api = api; _store = store; _io = io; _warn = warn;
         _store.LoadFrom(Array.Empty<MissionRecord>());
-        _subscription = api.Subscribe("vgmissionjournal.persistence", Observe);
+        _api.Changed += Observe; // subscribe before reading current state
         var current = api.CurrentSession;
         if (current != null && IsReady(current)) Restore(current);
     }
 
-    internal static bool IsCompatible(Version version, ILifecycleApi? api) => version.Major == 0 && version.Minor == 1
-        && version >= new Version(0, 1, 2) && api != null
-        && api.Capabilities.Any(c => c.Available && c.Name == "session-lifecycle")
-        && api.Capabilities.Any(c => c.Available && c.Name == "save-outcomes");
+    /// <summary>Floor is the earliest API exposing the typed service root
+    /// (ModApi.Services) with lifecycle session tracking and save outcomes
+    /// (0.2.8, enforced by the hard BepInEx dependency). No exact-minor
+    /// upper gate — typed availability reports health for newer versions.</summary>
+    internal static bool IsCompatible(ILifecycleService? api) =>
+        api != null
+        && api.SessionTracking.Availability.IsAvailable
+        && api.SaveOutcomes.Availability.IsAvailable;
 
     public bool CanRecord => !_disposed && _ready.HasValue && IsCurrent(_ready.Value);
     private static bool IsReady(SessionSnapshot s) => s.Phase == SessionPhase.PlayerReady || s.Phase == SessionPhase.GameplayInitialized;
@@ -88,7 +95,7 @@ internal sealed class LifecyclePersistence : IJournalPersistence
         if (_disposed) return;
         _disposed = true;
         _ready = null;
-        _subscription.Dispose();
+        _api.Changed -= Observe;
         _store.LoadFrom(Array.Empty<MissionRecord>());
     }
 }
