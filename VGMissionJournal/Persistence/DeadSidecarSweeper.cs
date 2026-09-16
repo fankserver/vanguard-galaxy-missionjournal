@@ -5,7 +5,7 @@ using System.IO;
 namespace VGMissionJournal.Persistence;
 
 /// <summary>
-/// Startup-time cleanup of sidecars whose vanilla save file has been
+/// Cleanup of sidecars (for an observed save directory) whose vanilla save file has been
 /// removed outside the game (manual deletion, save-manager tooling).
 /// Prevents unbounded accumulation across a player's Steam cloud dir.
 ///
@@ -14,7 +14,8 @@ namespace VGMissionJournal.Persistence;
 /// before deciding to delete. Skips anything that doesn't end with the
 /// live-sidecar suffix so peer mods' sidecars are left alone.</para>
 ///
-/// <para>Runs at plugin load (see <c>Plugin.Awake</c> in ML-T4i). Any IO
+/// <para>Runs from <c>LifecyclePersistence.Restore</c> for an observed save
+/// directory. Any IO
 /// failure is swallowed by the caller and warn-logged per R5.2; the
 /// sweep is purely janitorial and must never affect vanilla load.</para>
 /// </summary>

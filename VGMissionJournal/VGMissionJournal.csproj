@@ -4,7 +4,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>VGMissionJournal</AssemblyName>
     <Product>Mission Journal</Product>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>VGMissionJournal</RootNamespace>
@@ -28,26 +28,14 @@
     <PackageReference Include="BepInEx.Core" Version="5.*" IncludeAssets="compile" />
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" IncludeAssets="compile" />
     <PackageReference Include="UnityEngine.Modules" Version="6000.2.6" IncludeAssets="compile" />
-    <!-- Pinned to 2.10.x: BepInEx 5 ships HarmonyX 2.10, and 2.16 adds a
-         transitive dep on MonoMod.Backports that BepInEx 5 doesn't load at
-         runtime (FileNotFoundException on plugin startup). Dependabot is
-         instructed to leave this one alone until BepInEx 5 bumps HarmonyX
-         or we ship the MonoMod runtime DLLs ourselves. -->
-    <PackageReference Include="HarmonyX" Version="2.10.*" IncludeAssets="compile" />
     <!-- Ships at runtime: game 0.8.1 no longer provides Newtonsoft.Json.dll. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" IncludeAssets="compile;runtime" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Owner-provided publicized game reference. Never commit or package it.
-         make refresh-asm generates current metadata without changing sibling stubs. -->
-    <Reference Include="Assembly-CSharp" Condition="Exists('lib/Assembly-CSharp.dll')">
-      <HintPath>lib/Assembly-CSharp.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
+    <!-- Pure observer: no Harmony patches and no compile-time game reference.
+         Native detail inspection goes through the API's version-sensitive
+         escape hatch + VanillaReflection (see MissionRecordBuilder). -->
     <Reference Include="VGModAPI.Abstractions">
       <HintPath>lib/VGModAPI.Abstractions.dll</HintPath>
       <Private>false</Private>
